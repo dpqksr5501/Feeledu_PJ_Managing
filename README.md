@@ -2,7 +2,7 @@
 
 안드로이드 데스크 태블릿과 PC 관리자 화면을 제공하는 학원용 웹앱입니다. 데이터는 서버의 SQLite에 저장하고 GitHub는 코드·업데이트 관리와 자동 검사에 사용합니다.
 
-**무료 클라우드 운영:** 기존 기능을 유지하는 Cloudflare Workers + 영구 SQLite 배포 설정을 추가했습니다. [Cloudflare 배포·데이터 이전·백업 안내](deploy/CLOUDFLARE.md)를 참고하세요. 배포 설정을 준비한 것과 공개 배포 완료는 다르며, 실제 운영 주소는 계정 연결·배포 검증 후 제공합니다.
+**무료 클라우드 운영:** [관리자 화면](https://feeledu-attendance.feeledu-pj-managing.workers.dev/admin) · [태블릿 출퇴근](https://feeledu-attendance.feeledu-pj-managing.workers.dev/kiosk). PC가 꺼져 있어도 같은 서버를 사용합니다. 사용자가 새 시작을 선택해 기존 로컬 계정·직원·급여는 이전하지 않았습니다. [Cloudflare 운영·백업 안내](deploy/CLOUDFLARE.md)를 참고하세요.
 
 ## 태블릿·PC 관리
 
@@ -134,7 +134,8 @@ DB는 버전 테이블과 마이그레이션을 사용합니다. 더 최신 스�
 
 ## 백업·복구
 
-- 서버 시작 시와 매시간 점검해 실행 중인 날 하루 한 번 일관성 백업을 만듭니다. DB 옆 `backups/auto-YYYY-MM-DD.db`에 최근 30개를 보관합니다.
+- 로컬/자체 서버는 시작 시와 매시간 점검해 실행 중인 날 하루 한 번 일관성 백업을 만듭니다. DB 옆 `backups/auto-YYYY-MM-DD.db`에 최근 30개를 보관합니다.
+- Cloudflare 운영은 영구 SQLite와 공급자의 시점 복구 기능을 사용하며, 전체 백업 다운로드는 검사값을 포함한 JSON입니다. [운영·복구 절차](deploy/CLOUDFLARE.md)를 따릅니다.
 - 자동 백업도 같은 디스크에 있으므로 운영자는 **전체 백업 받기**로 별도 장소에 보관하세요.
 - 다운로드는 SQLite 백업 API를 사용합니다. 관리자 계정·근무·급여·태블릿 연결 정보를 포함하므로 접근을 제한하세요.
 - 복구 전 서버를 완전히 중지하고 기존 데이터 폴더/볼륨 전체를 별도 보관합니다. **새 빈 폴더/볼륨**에 백업을 `feeledu.db`로 놓고 그 위치를 사용하도록 설정해 재시작합니다. 기존 `-wal`·`-shm` 파일과 섞지 마세요.

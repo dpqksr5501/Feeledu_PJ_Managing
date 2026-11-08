@@ -2,6 +2,14 @@
 
 화면·Express API·계산 규칙을 유지하고, DB 연결만 Cloudflare의 **SQLite 기반 Durable Object**로 바꿉니다. 태블릿과 PC는 같은 배포 주소를 사용합니다. 코드와 배포 설정은 기존 GitHub 저장소에 보관하며 DB·비밀번호·배포 토큰은 올리지 않습니다.
 
+## 실제 운영 주소
+
+- 관리자: https://feeledu-attendance.feeledu-pj-managing.workers.dev/admin
+- 태블릿: https://feeledu-attendance.feeledu-pj-managing.workers.dev/kiosk
+- 2026-11-08 배포 완료. 사용자가 **기존 정보를 이전하지 않고 새로 설정**하기로 선택했으므로 과거 로컬 계정·직원·급여는 전송하지 않았습니다. 로컬 DB와 이전 전 백업은 보존합니다.
+- 새 운영자를 등록한 뒤 직원·시급·계산 기준·휴일을 설정하고 태블릿에 새 연결 코드를 입력합니다. 과거 로컬 계정이나 태블릿 토큰은 새 서버에서 사용할 수 없습니다.
+- 등록 코드는 Git에서 제외된 로컬 `data/cloud-setup-token`에 보관합니다. 첫 운영자가 생기면 같은 코드로 추가 초기 등록을 할 수 없습니다. 코드·비밀번호·DB는 저장소에 올리지 않습니다.
+
 ## 요금·제약
 
 - Workers Free / SQLite Durable Objects Free에서 운영합니다. 유료 플랜·도메인 구매·R2는 필요하지 않습니다. 무료 `workers.dev` HTTPS 주소를 사용합니다.
