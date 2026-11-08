@@ -1,0 +1,1456 @@
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  Activity,
+  ArrowDownToLine,
+  ArrowRight,
+  CalendarDays,
+  ClipboardList,
+  Clock3,
+  LayoutDashboard,
+  LogOut,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings2,
+  ShieldCheck,
+  Tablet,
+  Users,
+  Wallet,
+  X,
+} from "lucide-react";
+import type { Admin, Payroll, PayrollRow, Shift } from "../../shared/types.ts";
+import {
+  addDays,
+  formatTime,
+  hours,
+  money,
+  seoulDate,
+} from "../../shared/time.ts";
+import { api, ApiError, download } from "../api.ts";
+import { Alert, Brand, Empty, Help, Loading, Modal } from "../ui.tsx";
+import { AdminContext, type AdminData } from "./context.tsx";
+import {
+  AdjustmentForm,
+  EmployeeForm,
+  RateForm,
+  ReviewForm,
+  SettlementForm,
+  ShiftForm,
+  VoidForm,
+} from "./forms.tsx";
+import SettingsPage from "./SettingsPage.tsx";
+import { holidayName, workedDates } from "../../shared/workdays.ts";
+
+const navigation = [
+  { id: "overview", label: "대시보드", icon: LayoutDashboard },
+  { id: "records", label: "근무기록", icon: ClipboardList },
+  { id: "employees", label: "직원·시급", icon: Users },
+  { id: "payroll", label: "급여·수당", icon: Wallet },
+  { id: "audit", label: "변경 이력", icon: Activity },
+  { id: "settings", label: "설정", icon: Settings2 },
+];
+const actionLabels: Record<string, string> = {
+  setup: "운영자 설정",
+  login: "로그인",
+  "employee.create": "직원 등록",
+  "employee.update": "직원 수정",
+  "rate.update": "시급 변경",
+  "dayrate.update": "하루 시급 변경",
+  "dayrate.remove": "하루 시급 해제",
+  "shift.create": "근무 등록",
+  "shift.update": "근무 정정",
+  "shift.void": "근무 무효",
+  "clock.review": "출퇴근 확인",
+  "clock.recover": "미전송 기록 복구",
+  "policy.update": "계산 기준 수정",
+  "holiday.create": "휴일 등록",
+  "holiday.delete": "휴일 삭제",
+  "adjustment.create": "수당 등록",
+  "adjustment.delete": "수당 삭제",
+  "settlement.create": "정산 확정",
+  "account.create": "관리자 등록",
+  "account.update": "관리자 변경",
+  "password.change": "비밀번호 변경",
+  "device.pairing": "연결 코드 발급",
+  "device.paired": "태블릿 연결",
+  "device.revoke": "태블릿 연결 해제",
+  "backup.download": "백업 다운로드",
+};
+export default function AdminApp({
+  admin,
+  expired,
+  logout,
+}: {
+  admin: Admin;
+  expired: () => void;
+  logout: () => Promise<void>;
+}) {
+  const today = seoulDate();
+  const [from, setFrom] = useState(today.slice(0, 8) + "01");
+  const [to, setTo] = useState(today);
+  const [tab, setTab] = useState("overview");
+  const [data, setData] = useState<AdminData | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(
+    null,
+  );
+  const [modal, setModal] = useState<{
+    title: string;
+    content: ReactNode;
+  } | null>(null);
+  const [search, setSearch] = useState("");
+  const [recordFilter, setRecordFilter] = useState("all");
+  const refresh = useCallback(() => setRevision((v) => v + 1), []);
+  const close = useCallback(() => setModal(null), []);
+  const open = (title: string, content: ReactNode) =>
+    setModal({ title, content });
+  useEffect(() => {
+    let current = true;
+    setLoading(true);
+    const range = new URLSearchParams({ from, to }).toString();
+    const recentRange = new URLSearchParams({
+      from: addDays(today, -6),
+      to: today,
+    }).toString();
+    void Promise.all([
+      api<AdminData["employees"]>("/admin/employees"),
+      api<AdminData["records"]>("/admin/records?" + range),
+      api<AdminData["recentRecords"]>("/admin/records?" + recentRange),
+      api<AdminData["reviews"]>("/admin/reviews"),
+      api<AdminData["payroll"]>("/admin/payroll?" + range),
+      api<AdminData["policy"]>("/admin/settings"),
+      api<AdminData["holidays"]>("/admin/holidays"),
+      api<AdminData["adjustments"]>("/admin/adjustments?" + range),
+      admin.role === "owner"
+        ? api<Admin[]>("/admin/accounts")
+        : Promise.resolve([]),
+      admin.role === "owner"
+        ? api<AdminData["devices"]>("/admin/devices")
+        : Promise.resolve([]),
+      api<AdminData["audit"]>("/admin/audit"),
+      api<AdminData["settlements"]>("/admin/settlements"),
+    ])
+      .then(
+        ([
+          employees,
+          records,
+          recentRecords,
+          reviews,
+          payroll,
+          policy,
+          holidays,
+          adjustments,
+          accounts,
+          devices,
+          audit,
+          settlements,
+        ]) => {
+          if (current)
+            setData({
+              employees,
+              records,
+              recentRecords,
+              reviews,
+              payroll,
+              policy,
+              holidays,
+              adjustments,
+              accounts,
+              devices,
+              audit,
+              settlements,
+            });
+        },
+      )
+      .catch((err) => {
+        if (!current) return;
+        if (err instanceof ApiError && err.status === 401) expired();
+        else setNotice({ text: (err as Error).message, error: true });
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [from, to, revision, admin.role, today]);
+  useEffect(() => {
+    if (modal || !["overview", "records"].includes(tab)) return;
+    const timer = setInterval(refresh, 60000);
+    return () => clearInterval(timer);
+  }, [refresh, modal, tab]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(
+      () => setNotice(null),
+      notice.error ? 12000 : 4000,
+    );
+    return () => clearTimeout(timer);
+  }, [notice]);
+  async function mutate(path: string, body?: unknown, method = "POST") {
+    try {
+      await api(path, {
+        method,
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+      refresh();
+      setNotice({ text: "저장 완료", error: false });
+      return true;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) expired();
+      else setNotice({ text: (err as Error).message, error: true });
+      return false;
+    }
+  }
+  const navigate = (next: string) => {
+    setTab(next);
+    setSearch("");
+    window.scrollTo(0, 0);
+  };
+  const setPeriod = (start: string, finish: string) => {
+    if (
+      !start ||
+      !finish ||
+      start > finish ||
+      Date.parse(finish) - Date.parse(start) > 366 * 86400000
+    ) {
+      setNotice({
+        text: "조회 기간은 시작일 ≤ 종료일, 최대 1년으로 선택해 주세요.",
+        error: true,
+      });
+      return;
+    }
+    setFrom(start);
+    setTo(finish);
+  };
+  const holidayDates = (shift: Shift) =>
+    data
+      ? workedDates(shift, from, to).filter((date) =>
+          holidayName(date, data.holidays, data.policy),
+        )
+      : [];
+  const specialDates = (shift: Shift) =>
+    data
+      ? workedDates(shift, from, to).filter((date) =>
+          data.employees
+            .find((employee) => employee.id === shift.employee_id)
+            ?.day_rates?.some((rate) => rate.date === date),
+        )
+      : [];
+  const records =
+    data?.records.filter(
+      (r) =>
+        !r.voided &&
+        r.name.includes(search) &&
+        (tab !== "records" ||
+          recordFilter === "all" ||
+          (recordFilter === "holiday" && holidayDates(r).length > 0) ||
+          (recordFilter === "special" && specialDates(r).length > 0) ||
+          (recordFilter === "open" && !r.ended_at)),
+    ) || [];
+  const employees =
+    data?.employees.filter(
+      (e) => e.name.includes(search) || e.phone_last4.includes(search),
+    ) || [];
+  const active = data?.employees.filter((e) => e.active).length || 0;
+  const working =
+    data?.recentRecords.filter((s) => !s.ended_at && !s.voided) || [];
+  const weekHours =
+    data?.recentRecords
+      .filter((s) => !s.voided && s.ended_at)
+      .reduce(
+        (sum, s) =>
+          sum +
+          Math.max(
+            0,
+            Date.parse(s.ended_at!) -
+              Math.max(
+                Date.parse(s.started_at),
+                Date.parse(`${addDays(today, -6)}T00:00:00+09:00`),
+              ),
+          ) /
+            1000 -
+          s.break_minutes * 60,
+        0,
+      ) || 0;
+  const ctx = data && {
+    admin,
+    data,
+    refresh,
+    mutate,
+    open,
+    close,
+    from,
+    to,
+    setPeriod,
+    navigate,
+  };
+  const exportPayroll = () => {
+    if (!data) return;
+    const csvCell = (v: unknown) => {
+      const text = String(v ?? "");
+      return (
+        '"' +
+        (/^[\s]*[=+@-]/.test(text) ? "'" + text : text).replaceAll('"', '""') +
+        '"'
+      );
+    };
+    const saved = new Map(
+      data.payroll.settlement?.snapshot.rows.map((r) => [
+        r.employeeId,
+        r.total,
+      ]) || [],
+    );
+    const rows = [
+      [
+        "기간 시작",
+        "기간 종료",
+        "직원",
+        "근무시간",
+        "기본급",
+        "휴일가산",
+        "주휴수당",
+        "기타수당·조정",
+        "계산합계",
+        "이전 확정",
+        "차액",
+      ],
+      ...data.payroll.rows.map((r) => [
+        from,
+        to,
+        r.name,
+        r.seconds / 3600,
+        r.base,
+        r.holiday,
+        r.weekly,
+        r.adjustment,
+        r.total,
+        saved.get(r.employeeId) ?? "",
+        saved.has(r.employeeId) ? r.total - saved.get(r.employeeId)! : "",
+      ]),
+    ];
+    download(
+      `급여-${from}-${to}.csv`,
+      "\uFEFF" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n"),
+      "text/csv;charset=utf-8",
+    );
+  };
+  function payrollDetail(row: PayrollRow) {
+    open(
+      `${row.name} · 급여 계산 내역`,
+      <div className="form-body">
+        <div className="pay-detail">
+          <span>근무시간</span>
+          <b>{hours(row.seconds)}</b>
+          <span>기본급</span>
+          <b>{money(row.base)}</b>
+          <span>휴일 추가 가산</span>
+          <b>{money(row.holiday)}</b>
+          <span>주휴수당</span>
+          <b>{money(row.weekly)}</b>
+          <span>기타 수당·조정</span>
+          <b>{money(row.adjustment)}</b>
+          <strong>합계</strong>
+          <strong>{money(row.total)}</strong>
+        </div>
+        {row.weeklyDetails.length > 0 && (
+          <div className="rate-history">
+            <strong>주휴 계산 근거</strong>
+            {row.weeklyDetails.map((w) => (
+              <div key={w.date}>
+                <span>{w.date} 귀속</span>
+                <b>{money(w.amount)}</b>
+                <small>
+                  해당 주 실근무 {w.hours.toFixed(2)}시간 · 기본급 가중평균 시급
+                  적용
+                </small>
+              </div>
+            ))}
+          </div>
+        )}
+        {!!row.dailyDetails?.length && (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>날짜</th>
+                  <th>시간</th>
+                  <th>시급</th>
+                  <th>기본급</th>
+                  <th>휴일가산</th>
+                </tr>
+              </thead>
+              <tbody>
+                {row.dailyDetails.map((day) => (
+                  <tr key={day.date}>
+                    <td>
+                      {day.date}
+                      {day.holidayName && (
+                        <small className="cell-note">{day.holidayName}</small>
+                      )}
+                    </td>
+                    <td>{hours(day.seconds)}</td>
+                    <td>
+                      {money(day.hourlyRate)}
+                      {day.specialRate && (
+                        <small className="cell-note">하루 시급</small>
+                      )}
+                    </td>
+                    <td>{money(Math.round(day.base))}</td>
+                    <td>{money(Math.round(day.holiday))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="small muted inset">
+              일별 표시는 참고 금액 · 총액은 항목별 합산 후 반올림
+            </p>
+          </div>
+        )}
+        {row.warnings.map((w) => (
+          <Alert key={w}>{w}</Alert>
+        ))}
+        <Help title="계산 기준">
+          <p className="small muted">
+            기본급·휴일가산·주휴수당을 각각 합산한 뒤 원 단위 반올림합니다. 세전
+            금액이며 세금·보험 공제와 실제 지급은 포함하지 않습니다.
+          </p>
+        </Help>
+      </div>,
+    );
+  }
+  async function savedPayroll(id: string) {
+    try {
+      const saved = await api<Payroll>(`/admin/settlements/${id}`);
+      open(
+        "보존된 확정 정산",
+        <div className="form-body">
+          <Alert kind="success">
+            {saved.from} ~ {saved.to} · 확정 합계 {money(saved.total)}
+          </Alert>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>직원</th>
+                  <th>기본급</th>
+                  <th>휴일</th>
+                  <th>주휴</th>
+                  <th>기타</th>
+                  <th>확정 합계</th>
+                </tr>
+              </thead>
+              <tbody>
+                {saved.rows.map((r) => (
+                  <tr key={r.employeeId}>
+                    <td>{r.name}</td>
+                    <td>{money(r.base)}</td>
+                    <td>{money(r.holiday)}</td>
+                    <td>{money(r.weekly)}</td>
+                    <td>{money(r.adjustment)}</td>
+                    <td>{money(r.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p>확정 당시 기준</p>
+        </div>,
+      );
+    } catch (err) {
+      setNotice({ text: (err as Error).message, error: true });
+    }
+  }
+  const periodControl = (
+    <div className="period-control">
+      <CalendarDays size={16} />
+      <input
+        aria-label="조회 시작일"
+        type="date"
+        value={from}
+        onChange={(e) => setPeriod(e.target.value, to)}
+      />
+      <span>—</span>
+      <input
+        aria-label="조회 종료일"
+        type="date"
+        value={to}
+        onChange={(e) => setPeriod(from, e.target.value)}
+      />
+    </div>
+  );
+  function recordTable(items: Shift[], compact = false) {
+    return (
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>직원</th>
+              <th>근무일</th>
+              <th>출근</th>
+              <th>퇴근</th>
+              {!compact && (
+                <>
+                  <th>휴게</th>
+                  <th>근무시간</th>
+                </>
+              )}
+              <th>상태</th>
+              {!compact && <th>관리</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((s) => (
+              <tr key={s.id}>
+                <td>
+                  <span className="person-cell">
+                    <span className="avatar">{s.name.slice(0, 1)}</span>
+                    <b>{s.name}</b>
+                  </span>
+                </td>
+                <td>
+                  {seoulDate(s.started_at)}
+                  {!compact &&
+                    holidayDates(s).map((date) => (
+                      <small key={date} className="cell-note">
+                        {date === seoulDate(s.started_at) ? "" : date + " "}
+                        {holidayName(date, data!.holidays, data!.policy)}
+                      </small>
+                    ))}
+                  {!compact &&
+                    specialDates(s).map((date) => (
+                      <small key={date} className="cell-note">
+                        {date === seoulDate(s.started_at) ? "" : date + " "}하루
+                        시급
+                      </small>
+                    ))}
+                </td>
+                <td>{formatTime(s.started_at)}</td>
+                <td>
+                  {s.ended_at ? (
+                    <>
+                      {seoulDate(s.ended_at) !== seoulDate(s.started_at) && (
+                        <small className="date-prefix">
+                          {seoulDate(s.ended_at)}{" "}
+                        </small>
+                      )}
+                      {formatTime(s.ended_at)}
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                {!compact && (
+                  <>
+                    <td>{s.break_minutes}분</td>
+                    <td>
+                      {s.ended_at
+                        ? hours(
+                            Math.max(
+                              0,
+                              (Date.parse(s.ended_at) -
+                                Date.parse(s.started_at)) /
+                                1000 -
+                                s.break_minutes * 60,
+                            ),
+                          )
+                        : "—"}
+                    </td>
+                  </>
+                )}
+                <td>
+                  <span className={`badge ${s.ended_at ? "" : "green"}`}>
+                    {s.ended_at ? "퇴근 완료" : "근무 중"}
+                  </span>
+                </td>
+                {!compact && (
+                  <td>
+                    <div className="row">
+                      <button
+                        className="text-button"
+                        onClick={() =>
+                          open("근무기록 정정", <ShiftForm shift={s} />)
+                        }
+                      >
+                        정정
+                      </button>
+                      <button
+                        className="text-button danger"
+                        onClick={() =>
+                          open("근무기록 무효 처리", <VoidForm shift={s} />)
+                        }
+                      >
+                        무효
+                      </button>
+                    </div>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!items.length && <Empty>근무기록 없음</Empty>}
+      </div>
+    );
+  }
+  return (
+    <div className="admin-layout">
+      <aside className="sidebar">
+        <Brand />
+
+        <nav>
+          {navigation.map((item) => (
+            <button
+              key={item.id}
+              className={tab === item.id ? "active" : ""}
+              onClick={() => navigate(item.id)}
+            >
+              <item.icon size={19} />
+              {item.label}
+              {item.id === "records" && !!data?.reviews.length && (
+                <span className="nav-count">{data.reviews.length}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+        <a
+          className="tablet-link"
+          href="/kiosk"
+          target={admin.shared_tablet ? undefined : "_blank"}
+          rel="noreferrer"
+          onClick={(event) => {
+            if (!admin.shared_tablet) return;
+            event.preventDefault();
+            void logout()
+              .then(() => {
+                location.href = "/kiosk";
+              })
+              .catch((err: Error) =>
+                setNotice({ text: err.message, error: true }),
+              );
+          }}
+        >
+          <Tablet size={19} />
+          <span>출퇴근 화면</span>
+          <ArrowRight size={16} />
+        </a>
+        <div className="sidebar-user">
+          <span className="avatar">{admin.name.slice(0, 1)}</span>
+          <div>
+            <strong>{admin.name}</strong>
+            <small>{admin.role === "owner" ? "운영자" : "학원 관리자"}</small>
+          </div>
+          <button
+            aria-label="로그아웃"
+            className="icon-button"
+            onClick={() =>
+              void logout().catch((err) =>
+                setNotice({ text: err.message, error: true }),
+              )
+            }
+          >
+            <LogOut size={17} />
+          </button>
+        </div>
+      </aside>
+      <div className="admin-main">
+        <header className="topbar">
+          <span>
+            {data?.policy.academyName || "필에듀"}{" "}
+            <span className="divider">/</span> 근무 관리
+          </span>
+          <div className="row">
+            <span className="today-label">
+              {new Intl.DateTimeFormat("ko-KR", {
+                timeZone: "Asia/Seoul",
+                month: "long",
+                day: "numeric",
+                weekday: "short",
+              }).format(new Date())}
+            </span>
+          </div>
+        </header>
+        <main className="content">
+          <div className="page-heading">
+            <div>
+              <h1>{navigation.find((n) => n.id === tab)?.label}</h1>
+            </div>
+            <button
+              className="button secondary"
+              onClick={refresh}
+              disabled={loading}
+            >
+              <RefreshCw size={16} className={loading ? "spin" : ""} /> 새로고침
+            </button>
+          </div>
+          {data && ctx ? (
+            <AdminContext.Provider value={ctx}>
+              {!data.policy.confirmed && tab !== "settings" && (
+                <Alert>
+                  수당 기준 확인 필요 · 정산 확정 전 설정하세요.{" "}
+                  <button
+                    className="text-button"
+                    onClick={() => navigate("settings")}
+                  >
+                    기준 설정하기 <ArrowRight size={14} />
+                  </button>
+                </Alert>
+              )}
+              {tab === "overview" && (
+                <>
+                  <div className="stats-grid">
+                    <Stat
+                      label="근무 중"
+                      value={working.length + "명"}
+                      note={`재직 조교 ${active}명`}
+                      icon={<Users />}
+                      accent
+                    />
+                    <Stat
+                      label="최근 7일 근무"
+                      value={hours(weekHours)}
+                      note="휴게 제외"
+                      icon={<Clock3 />}
+                    />
+                    <Stat
+                      label="예상 급여"
+                      value={money(data.payroll.total)}
+                      note={`${from} ~ ${to} · 세전`}
+                      icon={<Wallet />}
+                    />
+                    <Stat
+                      label="확인 대기"
+                      value={data.reviews.length + "건"}
+                      note="검토 필요"
+                      icon={<ShieldCheck />}
+                    />
+                  </div>
+                  <div className="dashboard-grid">
+                    <section className="panel">
+                      <div className="panel-heading">
+                        <div>
+                          <h2>최근 7일 근무</h2>
+                        </div>
+                        <span className="legend">
+                          <i /> 근무시간
+                        </span>
+                      </div>
+                      <div className="week-chart">
+                        {Array.from({ length: 7 }, (_, i) => {
+                          const date = addDays(today, i - 6);
+                          const seconds = data.recentRecords
+                            .filter((s) => !s.voided && s.ended_at)
+                            .reduce((sum, s) => {
+                              const total =
+                                Date.parse(s.ended_at!) -
+                                Date.parse(s.started_at);
+                              const overlap = Math.max(
+                                0,
+                                Math.min(
+                                  Date.parse(s.ended_at!),
+                                  Date.parse(
+                                    `${addDays(date, 1)}T00:00:00+09:00`,
+                                  ),
+                                ) -
+                                  Math.max(
+                                    Date.parse(s.started_at),
+                                    Date.parse(`${date}T00:00:00+09:00`),
+                                  ),
+                              );
+                              return (
+                                sum +
+                                (overlap / 1000) *
+                                  Math.max(
+                                    0,
+                                    1 - (s.break_minutes * 60000) / total,
+                                  )
+                              );
+                            }, 0);
+                          return (
+                            <div
+                              className={`chart-day ${date === today ? "current" : ""}`}
+                              key={date}
+                            >
+                              <small>{(seconds / 3600).toFixed(1)}h</small>
+                              <div className="bar-track">
+                                <div
+                                  className="bar"
+                                  style={{
+                                    height: `${Math.min(100, (seconds / 3600 / Math.max(8, weekHours / 3600)) * 100)}%`,
+                                  }}
+                                />
+                              </div>
+                              <span>
+                                {new Date(
+                                  `${date}T12:00:00Z`,
+                                ).toLocaleDateString("ko-KR", {
+                                  weekday: "short",
+                                })}
+                              </span>
+                              <small>{date.slice(5).replace("-", ".")}</small>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                    <section className="panel working-panel">
+                      <div className="panel-heading">
+                        <div>
+                          <h2>근무 중</h2>
+                        </div>
+                        <span className="badge green">{working.length}명</span>
+                      </div>
+                      {working.length ? (
+                        working.map((s) => (
+                          <div className="working-person" key={s.id}>
+                            <span className="avatar">{s.name.slice(0, 1)}</span>
+                            <div>
+                              <strong>{s.name}</strong>
+                              <small>
+                                {seoulDate(s.started_at)} ·{" "}
+                                {formatTime(s.started_at)} 출근
+                              </small>
+                            </div>
+                            <span className="dot" />
+                          </div>
+                        ))
+                      ) : (
+                        <Empty>근무 중인 직원 없음</Empty>
+                      )}
+                      <button
+                        className="text-button"
+                        onClick={() => navigate("records")}
+                      >
+                        전체 근무기록 보기 <ArrowRight size={15} />
+                      </button>
+                    </section>
+                  </div>
+                  <section className="panel">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>최근 근무기록</h2>
+                      </div>
+                      <button
+                        className="text-button"
+                        onClick={() => navigate("records")}
+                      >
+                        전체 보기 <ArrowRight size={15} />
+                      </button>
+                    </div>
+                    {recordTable(records.slice(0, 5), true)}
+                  </section>
+                </>
+              )}
+              {tab === "records" && (
+                <>
+                  {!!data.reviews.length && (
+                    <section className="panel review-panel">
+                      <div className="panel-heading">
+                        <div>
+                          <h2>
+                            승인 대기{" "}
+                            <span className="badge amber">
+                              {data.reviews.length}건
+                            </span>
+                          </h2>
+                          <p>출근 → 퇴근 순으로 승인</p>
+                        </div>
+                      </div>
+                      {data.reviews.map((event) => (
+                        <div className="review-row" key={event.id}>
+                          <span className="avatar">
+                            {event.name.slice(0, 1)}
+                          </span>
+                          <div>
+                            <strong>
+                              {event.name} ·{" "}
+                              {event.action === "in" ? "출근" : "퇴근"}
+                            </strong>
+                            <small>
+                              {seoulDate(event.captured_at)}{" "}
+                              {formatTime(event.captured_at)} ·{" "}
+                              {event.device_name} · {event.review_reason}
+                            </small>
+                          </div>
+                          <div className="row">
+                            <button
+                              className="button small secondary"
+                              onClick={() =>
+                                open(
+                                  "출퇴근 기록 반려",
+                                  <ReviewForm event={event} approve={false} />,
+                                )
+                              }
+                            >
+                              반려
+                            </button>
+                            <button
+                              className="button small primary"
+                              onClick={() =>
+                                open(
+                                  "출퇴근 기록 승인",
+                                  <ReviewForm event={event} approve />,
+                                )
+                              }
+                            >
+                              확인·승인
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </section>
+                  )}
+                  <div className="toolbar">
+                    {periodControl}
+                    <div className="row">
+                      <select
+                        aria-label="근무기록 필터"
+                        value={recordFilter}
+                        onChange={(event) =>
+                          setRecordFilter(event.target.value)
+                        }
+                      >
+                        <option value="all">전체 근무</option>
+                        <option value="holiday">휴일·공휴일 근무</option>
+                        <option value="special">하루 시급 적용</option>
+                        <option value="open">퇴근 누락</option>
+                      </select>
+                      <label className="button secondary">
+                        복구 파일 가져오기
+                        <input
+                          type="file"
+                          accept="application/json,.json"
+                          hidden
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            void file
+                              .text()
+                              .then((text) => {
+                                const events = JSON.parse(text);
+                                if (!Array.isArray(events))
+                                  throw new Error(
+                                    "출퇴근 기록 배열이 필요합니다.",
+                                  );
+                                return mutate("/admin/recover-events", {
+                                  events,
+                                });
+                              })
+                              .catch((err) =>
+                                setNotice({
+                                  text: "복구 파일 확인: " + err.message,
+                                  error: true,
+                                }),
+                              );
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                      <SearchBox value={search} set={setSearch} />
+                      <button
+                        className="button primary"
+                        onClick={() => open("근무기록 추가", <ShiftForm />)}
+                      >
+                        <Plus size={17} /> 기록 추가
+                      </button>
+                    </div>
+                  </div>
+                  <section className="panel">{recordTable(records)}</section>
+                  {data.records.some((s) => s.voided) && (
+                    <Help title="무효 기록 안내">
+                      <p className="small muted">
+                        무효 처리한 기록은 이 목록에서 제외되며 변경 이력에서
+                        원본을 확인할 수 있습니다.
+                      </p>
+                    </Help>
+                  )}
+                </>
+              )}
+              {tab === "employees" && (
+                <>
+                  <div className="toolbar">
+                    <span className="muted">
+                      재직 {active}명 · 전체 {data.employees.length}명
+                    </span>
+                    <div className="row">
+                      <SearchBox value={search} set={setSearch} />
+                      <button
+                        className="button primary"
+                        onClick={() => open("조교 등록", <EmployeeForm />)}
+                      >
+                        <Plus size={17} /> 조교 등록
+                      </button>
+                    </div>
+                  </div>
+                  <section className="panel">
+                    <div className="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>직원</th>
+                            <th>출퇴근 번호</th>
+                            <th>현재 시급</th>
+                            <th>주휴 계산</th>
+                            <th>휴일 배율</th>
+                            <th>상태</th>
+                            <th>관리</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {employees.map((e) => (
+                            <tr key={e.id}>
+                              <td>
+                                <span className="person-cell">
+                                  <span className="avatar">
+                                    {e.name.slice(0, 1)}
+                                  </span>
+                                  <span>
+                                    <b>{e.name}</b>
+                                    {e.note && (
+                                      <small className="cell-note">
+                                        {e.note}
+                                      </small>
+                                    )}
+                                  </span>
+                                </span>
+                              </td>
+                              <td>
+                                <span className="mono">{e.phone_last4}</span>
+                              </td>
+                              <td>
+                                <b>
+                                  {e.current_rate
+                                    ? money(e.current_rate)
+                                    : "적용 시급 없음"}
+                                </b>
+                              </td>
+                              <td>{e.weekly_enabled ? "대상" : "제외"}</td>
+                              <td>
+                                {e.holiday_multiplier ??
+                                  data.policy.holidayMultiplier}
+                                배
+                                {e.holiday_multiplier === null && (
+                                  <small className="cell-note">공통 기준</small>
+                                )}
+                              </td>
+                              <td>
+                                <span
+                                  className={`badge ${e.active ? "green" : ""}`}
+                                >
+                                  {e.active ? "재직" : "퇴사"}
+                                </span>
+                              </td>
+                              <td>
+                                <div className="row">
+                                  <button
+                                    className="text-button"
+                                    onClick={() =>
+                                      open(
+                                        `${e.name} · 직원 정보`,
+                                        <EmployeeForm employee={e} />,
+                                      )
+                                    }
+                                  >
+                                    정보 수정
+                                  </button>
+                                  <button
+                                    className="text-button"
+                                    onClick={() =>
+                                      open(
+                                        `${e.name} · 시급 이력`,
+                                        <RateForm employee={e} />,
+                                      )
+                                    }
+                                  >
+                                    시급 이력
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {!employees.length && (
+                        <Empty>
+                          조교를 등록하면 출퇴근과 급여 관리를 시작할 수
+                          있습니다.
+                        </Empty>
+                      )}
+                    </div>
+                  </section>
+                </>
+              )}
+              {tab === "payroll" && (
+                <>
+                  <div className="toolbar">
+                    {periodControl}
+                    <div className="row">
+                      <button
+                        className="button secondary"
+                        onClick={exportPayroll}
+                      >
+                        <ArrowDownToLine size={16} /> CSV 내보내기
+                      </button>
+                      <button
+                        className="button primary"
+                        onClick={() => open("정산 확인", <SettlementForm />)}
+                        disabled={
+                          data.payroll.warnings.length > 0 ||
+                          data.payroll.rows.some((r) => r.warnings.length) ||
+                          !data.payroll.rows.length ||
+                          to >= today
+                        }
+                      >
+                        정산 확정
+                      </button>
+                    </div>
+                  </div>
+                  {data.payroll.warnings.map((w) => (
+                    <Alert key={w}>{w}</Alert>
+                  ))}
+                  <div className="payroll-summary">
+                    <div>
+                      <p>예상 급여 · 세전</p>
+                      <strong>{money(data.payroll.total)}</strong>
+                    </div>
+                    <div className="summary-side">
+                      <span>
+                        {data.payroll.rows.length}명 ·{" "}
+                        {hours(
+                          data.payroll.rows.reduce((n, r) => n + r.seconds, 0),
+                        )}
+                      </span>
+                      <span className="badge">
+                        {data.payroll.settlement
+                          ? `확정본 v${data.payroll.settlement.version} 보존 중`
+                          : "미확정"}
+                      </span>
+                      {data.payroll.settlement && (
+                        <>
+                          <small>
+                            이전 확정 {money(data.payroll.settlement.total)}
+                          </small>
+                          <b>
+                            재계산 차액 {money(data.payroll.difference || 0)}
+                          </b>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <section className="panel">
+                    <div className="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>직원</th>
+                            <th>근무시간</th>
+                            <th>기본급</th>
+                            <th>휴일가산</th>
+                            <th>주휴수당</th>
+                            <th>기타·조정</th>
+                            <th>합계</th>
+                            <th>상세</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.payroll.rows.map((r) => (
+                            <tr key={r.employeeId}>
+                              <td>
+                                <b>{r.name}</b>
+                                {!!r.warnings.length && (
+                                  <span className="cell-note danger">
+                                    확인 필요
+                                  </span>
+                                )}
+                              </td>
+                              <td>{hours(r.seconds)}</td>
+                              <td>{money(r.base)}</td>
+                              <td>{money(r.holiday)}</td>
+                              <td>{money(r.weekly)}</td>
+                              <td>{money(r.adjustment)}</td>
+                              <td>
+                                <strong className="accent-text">
+                                  {money(r.total)}
+                                </strong>
+                              </td>
+                              <td>
+                                <button
+                                  className="text-button"
+                                  onClick={() => payrollDetail(r)}
+                                >
+                                  계산 내역
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {!data.payroll.rows.length && (
+                        <Empty>계산할 근무기록이 없습니다.</Empty>
+                      )}
+                    </div>
+                  </section>
+                  <Help title="계산 기준">
+                    <p className="small muted">
+                      주휴수당은 설정한 한 주의 마지막 날에 귀속됩니다. 월
+                      경계를 넘는 주도 전체 주의 실근무로 계산합니다. 세금·보험
+                      공제 및 자동 이체는 포함하지 않습니다.
+                    </p>
+                  </Help>
+                  <section className="panel">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>개인별 수당·조정</h2>
+                      </div>
+                      <button
+                        className="button secondary"
+                        onClick={() =>
+                          open("개인별 수당·조정 추가", <AdjustmentForm />)
+                        }
+                      >
+                        <Plus size={16} /> 수당 추가
+                      </button>
+                    </div>
+                    {data.adjustments.length ? (
+                      <div className="table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>귀속일</th>
+                              <th>직원</th>
+                              <th>항목·사유</th>
+                              <th>금액</th>
+                              <th>관리</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {data.adjustments.map((a) => (
+                              <tr key={a.id}>
+                                <td>{a.date}</td>
+                                <td>{a.name}</td>
+                                <td>{a.reason}</td>
+                                <td>{money(a.amount)}</td>
+                                <td>
+                                  <button
+                                    className="text-button danger"
+                                    onClick={() => {
+                                      if (
+                                        confirm(
+                                          "이 수당을 삭제할까요? 변경 이력은 남습니다.",
+                                        )
+                                      )
+                                        void mutate(
+                                          `/admin/adjustments/${a.id}`,
+                                          undefined,
+                                          "DELETE",
+                                        );
+                                    }}
+                                  >
+                                    삭제
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <Empty>추가 수당 없음</Empty>
+                    )}
+                  </section>
+                  <section className="panel">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>확정한 정산</h2>
+                      </div>
+                    </div>
+                    {data.settlements.length ? (
+                      <div className="table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>기간</th>
+                              <th>버전</th>
+                              <th>확정 합계</th>
+                              <th>확정자</th>
+                              <th>사유</th>
+                              <th>관리</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {data.settlements.map((s) => (
+                              <tr key={s.id}>
+                                <td>
+                                  {s.date_from} ~ {s.date_to}
+                                </td>
+                                <td>v{s.version}</td>
+                                <td>{money(s.total)}</td>
+                                <td>{s.name}</td>
+                                <td>{s.reason}</td>
+                                <td>
+                                  <div className="row">
+                                    <button
+                                      className="text-button"
+                                      onClick={() =>
+                                        setPeriod(s.date_from, s.date_to)
+                                      }
+                                    >
+                                      기간 조회
+                                    </button>
+                                    <button
+                                      className="text-button"
+                                      onClick={() => void savedPayroll(s.id)}
+                                    >
+                                      확정본
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <Empty>확정 내역 없음</Empty>
+                    )}
+                  </section>
+                </>
+              )}
+              {tab === "audit" && (
+                <section className="panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>최근 변경 이력</h2>
+                      <p>최근 200건</p>
+                    </div>
+                    <ShieldCheck size={22} className="accent-text" />
+                  </div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>시각</th>
+                          <th>수행자</th>
+                          <th>변경 내용</th>
+                          <th>상세</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.audit.map((a) => (
+                          <tr key={a.id}>
+                            <td>
+                              {seoulDate(a.created_at)}{" "}
+                              {formatTime(a.created_at)}
+                            </td>
+                            <td>{a.actor_name || "태블릿"}</td>
+                            <td>{actionLabels[a.action] || a.action}</td>
+                            <td>
+                              <button
+                                className="text-button"
+                                onClick={() =>
+                                  open(
+                                    "변경 이력 상세",
+                                    <div className="form-body">
+                                      <p>
+                                        {actionLabels[a.action] || a.action} ·{" "}
+                                        {a.actor_name || "태블릿"}
+                                      </p>
+                                      <pre className="audit-json">
+                                        {JSON.stringify(
+                                          JSON.parse(a.detail),
+                                          null,
+                                          2,
+                                        )}
+                                      </pre>
+                                    </div>,
+                                  )
+                                }
+                              >
+                                변경 전후 보기
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
+              {tab === "settings" && <SettingsPage />}
+              {modal && (
+                <Modal title={modal.title} close={close}>
+                  {modal.content}
+                </Modal>
+              )}
+            </AdminContext.Provider>
+          ) : loading ? (
+            <Loading />
+          ) : (
+            <div className="panel">
+              <Empty>데이터를 불러오지 못했습니다. 새로고침해 주세요.</Empty>
+            </div>
+          )}
+        </main>
+      </div>
+      {notice && (
+        <div
+          role={notice.error ? "alert" : "status"}
+          className={`toast ${notice.error ? "error" : ""}`}
+        >
+          <span>{notice.text}</span>
+          <button
+            aria-label="알림 닫기"
+            className="icon-button"
+            onClick={() => setNotice(null)}
+          >
+            <X size={17} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+function Stat({
+  label,
+  value,
+  note,
+  icon,
+  accent,
+}: {
+  label: string;
+  value: string;
+  note: string;
+  icon: ReactNode;
+  accent?: boolean;
+}) {
+  return (
+    <div className={`stat ${accent ? "accent" : ""}`}>
+      <div className="stat-top">
+        <span>{label}</span>
+        {icon}
+      </div>
+      <strong>{value}</strong>
+      <small>{note}</small>
+    </div>
+  );
+}
+function SearchBox({
+  value,
+  set,
+}: {
+  value: string;
+  set: (value: string) => void;
+}) {
+  return (
+    <label className="search-box">
+      <Search size={16} />
+      <input
+        aria-label="직원 검색"
+        value={value}
+        onChange={(e) => set(e.target.value)}
+        placeholder="직원 검색"
+      />
+    </label>
+  );
+}
