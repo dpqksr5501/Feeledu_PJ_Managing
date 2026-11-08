@@ -135,3 +135,45 @@ export type Device = {
   last_seen: string | null;
   created_at: string;
 };
+export type AttendanceSegment = {
+  shiftId: string;
+  startedAt: string;
+  endedAt: string;
+  seconds: number;
+  breakSeconds: number;
+  ongoing: boolean;
+};
+export type AttendanceDay = {
+  date: string;
+  completedSeconds: number;
+  liveSeconds: number;
+  holidayName: string;
+  segments: AttendanceSegment[];
+};
+export type EmployeeAttendance = {
+  id: string;
+  name: string;
+  active: boolean;
+  days: AttendanceDay[];
+  completedSeconds: number;
+  liveSeconds: number;
+  workedDays: number;
+  pendingCount: number;
+  warnings: string[];
+  workingSince: string | null;
+  weeklyEligible: boolean;
+  weeklyThresholdSeconds: number | null;
+};
+export type WeeklyAttendance = {
+  from: string;
+  to: string;
+  generatedAt: string;
+  weekStartsOn: number;
+  policyConfirmed: boolean;
+  employees: EmployeeAttendance[];
+  days: AttendanceDay[];
+  completedSeconds: number;
+  liveSeconds: number;
+  workingCount: number;
+  attentionCount: number;
+};

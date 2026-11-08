@@ -17,6 +17,7 @@ import {
 } from "../shared/time.ts";
 import { getPolicy, type Db } from "./database.ts";
 import { holidayName } from "../shared/workdays.ts";
+import { paidMillisecondsInRange } from "../shared/shift-duration.ts";
 
 export function calculatePayroll(db: Db, from: string, to: string): Payroll {
   const policy = getPolicy(db);
@@ -99,16 +100,13 @@ export function calculatePayroll(db: Db, from: string, to: string): Payroll {
           continue;
         }
         // An entered total break is allocated proportionally across date/rate segments.
-        const paidRatio = (duration - shift.break_minutes * 60) / duration;
         for (
           let cursor = Math.max(start, dayStart(firstWeek));
           cursor < Math.min(finish, end);
         ) {
           const date = seoulDate(cursor);
           const next = Math.min(finish, end, dayStart(addDays(date, 1)));
-          const paidMilliseconds =
-            Math.round((next - start) * paidRatio) -
-            Math.round((cursor - start) * paidRatio);
+          const paidMilliseconds = paidMillisecondsInRange(shift, cursor, next);
           const seconds = paidMilliseconds / 1000;
           const rate = rateAt(date);
           if (!rate) {

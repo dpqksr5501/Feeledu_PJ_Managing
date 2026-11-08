@@ -5,7 +5,6 @@ import {
   ArrowRight,
   CalendarDays,
   ClipboardList,
-  Clock3,
   LayoutDashboard,
   LogOut,
   Plus,
@@ -39,6 +38,7 @@ import {
   VoidForm,
 } from "./forms.tsx";
 import SettingsPage from "./SettingsPage.tsx";
+import WeeklyAttendance from "./WeeklyAttendance.tsx";
 import { holidayName, workedDates } from "../../shared/workdays.ts";
 
 const navigation = [
@@ -101,6 +101,7 @@ export default function AdminApp({
   } | null>(null);
   const [search, setSearch] = useState("");
   const [recordFilter, setRecordFilter] = useState("all");
+  const [recordEmployeeId, setRecordEmployeeId] = useState("");
   const refresh = useCallback(() => setRevision((v) => v + 1), []);
   const close = useCallback(() => setModal(null), []);
   const open = (title: string, content: ReactNode) =>
@@ -109,14 +110,9 @@ export default function AdminApp({
     let current = true;
     setLoading(true);
     const range = new URLSearchParams({ from, to }).toString();
-    const recentRange = new URLSearchParams({
-      from: addDays(today, -6),
-      to: today,
-    }).toString();
     void Promise.all([
       api<AdminData["employees"]>("/admin/employees"),
       api<AdminData["records"]>("/admin/records?" + range),
-      api<AdminData["recentRecords"]>("/admin/records?" + recentRange),
       api<AdminData["reviews"]>("/admin/reviews"),
       api<AdminData["payroll"]>("/admin/payroll?" + range),
       api<AdminData["policy"]>("/admin/settings"),
@@ -135,7 +131,6 @@ export default function AdminApp({
         ([
           employees,
           records,
-          recentRecords,
           reviews,
           payroll,
           policy,
@@ -150,7 +145,6 @@ export default function AdminApp({
             setData({
               employees,
               records,
-              recentRecords,
               reviews,
               payroll,
               policy,
@@ -176,7 +170,7 @@ export default function AdminApp({
     };
   }, [from, to, revision, admin.role, today]);
   useEffect(() => {
-    if (modal || !["overview", "records"].includes(tab)) return;
+    if (modal || tab !== "records") return;
     const timer = setInterval(refresh, 60000);
     return () => clearInterval(timer);
   }, [refresh, modal, tab]);
@@ -206,6 +200,7 @@ export default function AdminApp({
   const navigate = (next: string) => {
     setTab(next);
     setSearch("");
+    setRecordEmployeeId("");
     window.scrollTo(0, 0);
   };
   const setPeriod = (start: string, finish: string) => {
@@ -243,6 +238,7 @@ export default function AdminApp({
       (r) =>
         !r.voided &&
         r.name.includes(search) &&
+        (!recordEmployeeId || r.employee_id === recordEmployeeId) &&
         (tab !== "records" ||
           recordFilter === "all" ||
           (recordFilter === "holiday" && holidayDates(r).length > 0) ||
@@ -254,26 +250,6 @@ export default function AdminApp({
       (e) => e.name.includes(search) || e.phone_last4.includes(search),
     ) || [];
   const active = data?.employees.filter((e) => e.active).length || 0;
-  const working =
-    data?.recentRecords.filter((s) => !s.ended_at && !s.voided) || [];
-  const weekHours =
-    data?.recentRecords
-      .filter((s) => !s.voided && s.ended_at)
-      .reduce(
-        (sum, s) =>
-          sum +
-          Math.max(
-            0,
-            Date.parse(s.ended_at!) -
-              Math.max(
-                Date.parse(s.started_at),
-                Date.parse(`${addDays(today, -6)}T00:00:00+09:00`),
-              ),
-          ) /
-            1000 -
-          s.break_minutes * 60,
-        0,
-      ) || 0;
   const ctx = data && {
     admin,
     data,
@@ -699,147 +675,17 @@ export default function AdminApp({
               )}
               {tab === "overview" && (
                 <>
-                  <div className="stats-grid">
-                    <Stat
-                      label="근무 중"
-                      value={working.length + "명"}
-                      note={`재직 조교 ${active}명`}
-                      icon={<Users />}
-                      accent
-                    />
-                    <Stat
-                      label="최근 7일 근무"
-                      value={hours(weekHours)}
-                      note="휴게 제외"
-                      icon={<Clock3 />}
-                    />
-                    <Stat
-                      label="예상 급여"
-                      value={money(data.payroll.total)}
-                      note={`${from} ~ ${to} · 세전`}
-                      icon={<Wallet />}
-                    />
-                    <Stat
-                      label="확인 대기"
-                      value={data.reviews.length + "건"}
-                      note="검토 필요"
-                      icon={<ShieldCheck />}
-                    />
-                  </div>
-                  <div className="dashboard-grid">
-                    <section className="panel">
-                      <div className="panel-heading">
-                        <div>
-                          <h2>최근 7일 근무</h2>
-                        </div>
-                        <span className="legend">
-                          <i /> 근무시간
-                        </span>
-                      </div>
-                      <div className="week-chart">
-                        {Array.from({ length: 7 }, (_, i) => {
-                          const date = addDays(today, i - 6);
-                          const seconds = data.recentRecords
-                            .filter((s) => !s.voided && s.ended_at)
-                            .reduce((sum, s) => {
-                              const total =
-                                Date.parse(s.ended_at!) -
-                                Date.parse(s.started_at);
-                              const overlap = Math.max(
-                                0,
-                                Math.min(
-                                  Date.parse(s.ended_at!),
-                                  Date.parse(
-                                    `${addDays(date, 1)}T00:00:00+09:00`,
-                                  ),
-                                ) -
-                                  Math.max(
-                                    Date.parse(s.started_at),
-                                    Date.parse(`${date}T00:00:00+09:00`),
-                                  ),
-                              );
-                              return (
-                                sum +
-                                (overlap / 1000) *
-                                  Math.max(
-                                    0,
-                                    1 - (s.break_minutes * 60000) / total,
-                                  )
-                              );
-                            }, 0);
-                          return (
-                            <div
-                              className={`chart-day ${date === today ? "current" : ""}`}
-                              key={date}
-                            >
-                              <small>{(seconds / 3600).toFixed(1)}h</small>
-                              <div className="bar-track">
-                                <div
-                                  className="bar"
-                                  style={{
-                                    height: `${Math.min(100, (seconds / 3600 / Math.max(8, weekHours / 3600)) * 100)}%`,
-                                  }}
-                                />
-                              </div>
-                              <span>
-                                {new Date(
-                                  `${date}T12:00:00Z`,
-                                ).toLocaleDateString("ko-KR", {
-                                  weekday: "short",
-                                })}
-                              </span>
-                              <small>{date.slice(5).replace("-", ".")}</small>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </section>
-                    <section className="panel working-panel">
-                      <div className="panel-heading">
-                        <div>
-                          <h2>근무 중</h2>
-                        </div>
-                        <span className="badge green">{working.length}명</span>
-                      </div>
-                      {working.length ? (
-                        working.map((s) => (
-                          <div className="working-person" key={s.id}>
-                            <span className="avatar">{s.name.slice(0, 1)}</span>
-                            <div>
-                              <strong>{s.name}</strong>
-                              <small>
-                                {seoulDate(s.started_at)} ·{" "}
-                                {formatTime(s.started_at)} 출근
-                              </small>
-                            </div>
-                            <span className="dot" />
-                          </div>
-                        ))
-                      ) : (
-                        <Empty>근무 중인 직원 없음</Empty>
-                      )}
-                      <button
-                        className="text-button"
-                        onClick={() => navigate("records")}
-                      >
-                        전체 근무기록 보기 <ArrowRight size={15} />
-                      </button>
-                    </section>
-                  </div>
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <div>
-                        <h2>최근 근무기록</h2>
-                      </div>
-                      <button
-                        className="text-button"
-                        onClick={() => navigate("records")}
-                      >
-                        전체 보기 <ArrowRight size={15} />
-                      </button>
-                    </div>
-                    {recordTable(records.slice(0, 5), true)}
-                  </section>
+                  <WeeklyAttendance
+                    refreshKey={revision}
+                    expired={expired}
+                    onAdd={() => open("조교 등록", <EmployeeForm />)}
+                    onRecords={(a, b, id) => {
+                      setPeriod(a, b);
+                      navigate("records");
+                      setRecordEmployeeId(id || "");
+                      setRecordFilter("all");
+                    }}
+                  />
                 </>
               )}
               {tab === "records" && (
@@ -904,6 +750,18 @@ export default function AdminApp({
                   <div className="toolbar">
                     {periodControl}
                     <div className="row">
+                      <select
+                        aria-label="근무 직원 필터"
+                        value={recordEmployeeId}
+                        onChange={(e) => setRecordEmployeeId(e.target.value)}
+                      >
+                        <option value="">전체 직원</option>
+                        {data.employees.map((e) => (
+                          <option key={e.id} value={e.id}>
+                            {e.name}
+                          </option>
+                        ))}
+                      </select>
                       <select
                         aria-label="근무기록 필터"
                         value={recordFilter}
@@ -1408,30 +1266,6 @@ export default function AdminApp({
           </button>
         </div>
       )}
-    </div>
-  );
-}
-function Stat({
-  label,
-  value,
-  note,
-  icon,
-  accent,
-}: {
-  label: string;
-  value: string;
-  note: string;
-  icon: ReactNode;
-  accent?: boolean;
-}) {
-  return (
-    <div className={`stat ${accent ? "accent" : ""}`}>
-      <div className="stat-top">
-        <span>{label}</span>
-        {icon}
-      </div>
-      <strong>{value}</strong>
-      <small>{note}</small>
     </div>
   );
 }

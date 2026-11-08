@@ -33,7 +33,6 @@ export type SettlementEntry = {
 export type AdminData = {
   employees: Employee[];
   records: Shift[];
-  recentRecords: Shift[];
   reviews: ReviewEvent[];
   payroll: Payroll;
   policy: Policy;

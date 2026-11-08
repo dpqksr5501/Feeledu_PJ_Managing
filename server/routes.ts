@@ -10,6 +10,7 @@ import { z } from "zod";
 import { randomInt, randomUUID } from "node:crypto";
 import { audit, getPolicy, transaction, type Db } from "./database.ts";
 import { calculatePayroll } from "./payroll.ts";
+import { attendanceWeek } from "./attendance.ts";
 import { addDays, dayStart, seoulDate } from "../shared/time.ts";
 import type { Admin, ClockEvent, Device, Shift } from "../shared/types.ts";
 export type Security = {
@@ -255,6 +256,11 @@ export function registerRoutes(
   const admin = router();
   app.use("/api/admin", requireAdmin, admin);
   admin.get("/me", (req: Authed, res) => res.json(req.admin));
+  admin.get("/attendance-week", (req, res) => {
+    const anchor =
+      req.query.date === undefined ? seoulDate() : date.parse(req.query.date);
+    res.json(attendanceWeek(db, anchor));
+  });
   admin.post("/activity", (req: Authed, res) => {
     if (req.admin!.shared_tablet) {
       const token = req.headers.cookie

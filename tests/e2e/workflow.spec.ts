@@ -380,6 +380,98 @@ test("operator administration, paired tablet, offline reload and manager access"
     .toBe(401);
   expect((await adminContext.request.get("/api/admin/me")).status()).toBe(200);
   await tabletAdminContext.close();
+  async function demoEmployee(name: string, last4: string) {
+    const response = await adminContext.request.post("/api/admin/employees", {
+      data: {
+        name,
+        phone_last4: last4,
+        active: true,
+        note: "브라우저 테스트",
+        weekly_enabled: true,
+        holiday_multiplier: null,
+        hourly_rate: 12000,
+        effective_from: "2026-01-01",
+      },
+      headers: { "X-Requested-With": "Feeledu" },
+    });
+    expect(response.status()).toBe(201);
+    return (await response.json()).id as string;
+  }
+  const demo2 = await demoEmployee("이조교", "0022"),
+    demo3 = await demoEmployee("박조교", "0033");
+  const primary = (
+    await (await adminContext.request.get("/api/admin/employees")).json()
+  ).find((e: { name: string }) => e.name === "김조교").id;
+  for (const [id, date, start, end] of [
+    [primary, "02", "09:00", "14:30"],
+    [primary, "04", "09:00", "13:00"],
+    [demo2, "02", "11:00", "15:00"],
+    [demo2, "04", "11:00", "15:00"],
+    [demo2, "06", "11:00", "16:00"],
+    [demo3, "03", "14:00", "19:00"],
+    [demo3, "05", "14:00", "20:00"],
+    [demo3, "07", "14:00", "18:00"],
+  ]) {
+    const saved = await adminContext.request.post("/api/admin/records", {
+      headers: { "X-Requested-With": "Feeledu" },
+      data: {
+        employee_id: id,
+        started_at: `2026-11-${date}T${start}:00+09:00`,
+        ended_at: `2026-11-${date}T${end}:00+09:00`,
+        break_minutes: 0,
+        note: "",
+        reason: "주간 시각화 테스트",
+      },
+    });
+    expect(saved.status()).toBe(201);
+  }
+  await admin.getByRole("button", { name: "대시보드", exact: true }).click();
+  await admin.getByLabel("주간 기준 날짜").fill("2026-11-04");
+  await expect(
+    admin.getByRole("article", { name: "김조교 주간 근무" }),
+  ).toContainText("9시간 30분");
+  await expect(
+    admin.getByRole("article", { name: "이조교 주간 근무" }),
+  ).toContainText("13시간");
+  await expect(
+    admin.getByRole("article", { name: "박조교 주간 근무" }),
+  ).toContainText("시간 기준 충족");
+  await admin
+    .getByRole("article", { name: "이조교 주간 근무" })
+    .getByRole("button", { name: /2026-11-02 근무/ })
+    .click();
+  dialog = admin.getByRole("dialog");
+  await expect(dialog.getByText("11:00:00", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("15:00:00", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "닫기" }).click();
+  await admin.getByRole("button", { name: "주간 표 보기" }).click();
+  await expect(admin.locator(".attendance-week-table tbody tr")).toHaveCount(3);
+  const weeklyDownload = admin.waitForEvent("download");
+  await admin.getByRole("button", { name: "CSV", exact: true }).click();
+  expect((await weeklyDownload).suggestedFilename()).toBe(
+    "주간근무-2026-11-02-2026-11-08.csv",
+  );
+  await admin.getByRole("button", { name: "직원별 카드 보기" }).click();
+  await admin.getByLabel("주간 직원 검색").fill("이조교");
+  await expect(admin.locator(".attendance-person-card")).toHaveCount(1);
+  await admin.getByLabel("주간 직원 검색").fill("");
+  await admin.screenshot({
+    path: ".tmp/qa-weekly-dashboard.png",
+    fullPage: true,
+  });
+  await admin.setViewportSize({ width: 800, height: 1280 });
+  expect(
+    await admin.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await admin.screenshot({ path: ".tmp/qa-weekly-tablet.png", fullPage: true });
+  await admin
+    .getByRole("article", { name: "이조교 주간 근무" })
+    .getByRole("button", { name: "기록", exact: true })
+    .click();
+  await expect(admin.getByLabel("근무 직원 필터")).toHaveValue(demo2);
+  await expect(admin.locator("tbody tr")).toHaveCount(3);
   expect(errors).toEqual([]);
   await managerContext.close();
   await kioskContext.close();
