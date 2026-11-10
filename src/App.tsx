@@ -5,6 +5,7 @@ import { api, send, ApiError } from "./api.ts";
 import { Alert, Brand, Field, Loading } from "./ui.tsx";
 import Kiosk from "./Kiosk.tsx";
 import AdminApp from "./admin/AdminApp.tsx";
+import DownloadApp from "./DownloadApp.tsx";
 
 function Auth({ setup, done }: { setup: boolean; done: () => void }) {
   const [busy, setBusy] = useState(false);
@@ -114,7 +115,11 @@ export default function App() {
     }
   }
   useEffect(() => {
-    if (!location.pathname.startsWith("/kiosk")) void load();
+    if (
+      !location.pathname.startsWith("/kiosk") &&
+      location.pathname !== "/download"
+    )
+      void load();
   }, []);
   useEffect(() => {
     if (!admin?.shared_tablet) return;
@@ -157,6 +162,7 @@ export default function App() {
     };
   }, [admin]);
   if (location.pathname.startsWith("/kiosk")) return <Kiosk />;
+  if (location.pathname === "/download") return <DownloadApp />;
   if (loading) return <Loading />;
   if (error)
     return (

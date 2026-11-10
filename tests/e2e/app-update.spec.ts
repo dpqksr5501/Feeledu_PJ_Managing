@@ -13,13 +13,34 @@ test("an installed shell preserves its offline queue across a safe idle update",
   test.setTimeout(60000);
   const original = readFileSync("dist/sw.js", "utf8");
   try {
-    await page.goto("/kiosk");
+    await page.goto("/download");
     await expect(
-      page.getByRole("link", { name: "앱 다운로드" }),
+      page.getByRole("heading", { name: "필에듀 출퇴근", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("img", { name: "FEEL EDU 앱 아이콘" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "APK 다운로드", exact: true }),
     ).toHaveAttribute(
       "href",
       "https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/latest/download/feeledu-attendance.apk",
     );
+    await page.setViewportSize({ width: 375, height: 812 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: ".tmp/qa-download-mobile.png",
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/kiosk");
+    await expect(
+      page.getByRole("link", { name: "앱 다운로드" }),
+    ).toHaveAttribute("href", "/download");
     await expect
       .poll(() => page.evaluate(() => !!navigator.serviceWorker.controller))
       .toBe(true);

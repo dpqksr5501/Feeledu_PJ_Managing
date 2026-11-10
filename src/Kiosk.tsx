@@ -19,7 +19,6 @@ import {
   checkAppUpdate,
   applyAppUpdate,
   isApplyingUpdate,
-  androidDownloadUrl,
 } from "./app-update.ts";
 type KioskNotice = { kind: "success" | "review" | "local"; text: string };
 
@@ -295,7 +294,7 @@ export default function Kiosk() {
         <div className="row">
           <a
             className="text-button"
-            href={androidDownloadUrl}
+            href="/download"
             target="_blank"
             rel="noopener noreferrer"
           >

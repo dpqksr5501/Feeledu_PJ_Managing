@@ -1,4 +1,8 @@
-안드로이드 태블릿용 **필에듀 출퇴근**입니다.
+<img src="https://feeledu-attendance.feeledu-pj-managing.workers.dev/brand/feeledu-logo.png" width="200" alt="FEEL EDU" />
+
+안드로이드 태블릿용 **필에듀 출퇴근**입니다. 설치 화면·홈 화면에 FEEL EDU 로고를 사용합니다. 1.0.1에서는 원형·둥근 사각형 아이콘에서도 전체 로고가 잘리지 않도록 여백을 조정했습니다.
+
+**[앱 다운로드 화면 열기](https://feeledu-attendance.feeledu-pj-managing.workers.dev/download)**
 
 1. 아래 **Assets → feeledu-attendance.apk**를 내려받아 설치하세요.
 2. Android에서 요청하면 이번 설치에 사용할 Chrome의 ‘이 출처 허용’을 승인하세요.
