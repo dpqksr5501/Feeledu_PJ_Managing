@@ -4,6 +4,16 @@
 
 ## 최신 결정·변경
 
+### Android APK·지속 배포 — 2026-11-10
+
+- 사용자는 Chrome 설치 메뉴가 보이지 않아 **GitHub Releases에서 APK를 내려받아 설치하는 배포**를 명시적으로 요청했다. Google Android Browser Helper 2.7.3 기반 TWA 앱(`kr.feeledu.attendance`, Android 6+)을 추가했다. APK 안에 기존 서버의 주소를 넣고 사이트/앱의 공개 인증서 연결을 구성한다. 별도 DB나 급여 산식을 복제하지 않는다.
+- APK 1.0.0은 `android-v1.0.0` 태그에서 자동 빌드·Android lint·서명/인증서 검사 및 전체 웹 검증 후 GitHub Releases에 게시했다. APK 3,814,475 bytes. https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/latest/download/feeledu-attendance.apk
+- 영구 서명 키는 Git에서 제외한 `.secrets/android-signing/`에 로컬 보관하고, CI용 키/비밀번호는 이 저장소의 암호화 Secrets에 저장했다. 기존 키·패키지명을 유지하고 새 Android 버전은 versionCode와 versionName을 올린 뒤 태그로 릴리즈한다. 키·비밀번호는 Git/릴리즈에 넣지 않는다.
+- 사용자가 **“허용 — 이 앱의 서버 자동 배포 연결”**을 명시적으로 승인했다. Cloudflare UI의 기존 Worker 설정에서 `Feeledu GitHub main deployment`, 범위 feeledu-attendance, 권한 Individual Workers Editor 토큰을 만들었다. GitHub 암호화 Secret `CLOUDFLARE_API_TOKEN`과 Variable `CLOUDFLARE_ACCOUNT_ID`로 연결했다. 전송용 로컬 평문은 제거했다. 기존 OAuth 권한은 확대하거나 GitHub에 복사하지 않았다.
+- `origin/main`이 작업 브랜치의 조상이어서 fast-forward로 검증된 소스를 main에 반영했다. 현재 운영 기준 브랜치는 main이다. 작업 브랜치→main의 CI 성공 후 검증한 dist와 같은 커밋의 서버를 기존 Worker/DO에 배포한다. 이전 CI가 새 배포를 덮지 않게 main HEAD 검사·배포 직렬화를 적용했다. Android 태그와 작업 브랜치는 서버를 배포하지 않는다.
+- 서비스워커 최초 등록/컴포넌트 조회 경합을 없앴고 실행·온라인/화면 복귀·5분 주기 갱신을 추가했다. 대기열0·입력/저장/전송 없음·1분 미조작일 때 자동 적용하며 새 입력을 잠근 후 실제 IndexedDB 대기열을 다시 확인한다. 연결 토큰·미전송 데이터는 지우지 않는다. 기존 구버전 앱은 새 코드가 한 번 로드된 뒤 이 자동 적용을 사용한다.
+- 로컬 31개 테스트·타입·빌드·Node 전체 시나리오와 실제 SW 교체 테스트를 통과했다. Cloudflare 전체 시나리오도 통과했다(파일 편집으로 새 SW를 만드는 테스트는 dev asset watcher의 자체 새로고침 때문에 Node 환경에서 수행). 실제 Android 기기의 설치·주소창 숨김·출퇴근은 기기 검증이 필요하다.
+
 ### 직원별 주간 대시보드 — 2026-11-08
 
 - 사용자가 새 Cloudflare 테스트 운영자 등록을 완료했다. 기존 계정은 유지한다. 직원별 7일 그래프·합계·표·검색·상태 필터·CSV·일별 상세·직원 ID 기반 기록 이동을 추가하고 운영 서버에 업데이트했다. 현재 버전은 `75c6b2a6-c26d-44be-a05e-2f4f522f129c`다.

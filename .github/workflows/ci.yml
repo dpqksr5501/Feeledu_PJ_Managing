@@ -22,3 +22,52 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - run: npm run test:cloud:e2e
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-web-dist
+          path: dist/
+          include-hidden-files: true
+          retention-days: 7
+  deploy:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.workflow == 'Verify attendance app'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: feeledu-production-deployment
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - name: Skip a superseded commit
+        id: current
+        run: |
+          if [ "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA" ]; then
+            echo 'deploy=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'A newer main commit exists; keeping the newer deployment.'
+          fi
+      - uses: actions/setup-node@v7
+        if: steps.current.outputs.deploy == 'true'
+        with:
+          node-version: 24
+          cache: npm
+      - if: steps.current.outputs.deploy == 'true'
+        run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        if: steps.current.outputs.deploy == 'true'
+        with:
+          name: verified-web-dist
+          path: dist
+      - name: Deploy verified build to the existing Worker
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Configure the Worker-scoped deployment token and account ID first.'; exit 1; }
+          npm exec -- wrangler deploy
+      - name: Check deployed app
+        if: steps.current.outputs.deploy == 'true'
+        run: |
+          curl --fail --retry 3 https://feeledu-attendance.feeledu-pj-managing.workers.dev/api/health
+          curl --fail --retry 3 https://feeledu-attendance.feeledu-pj-managing.workers.dev/.well-known/assetlinks.json | node --input-type=module -e 'let value="";for await(const chunk of process.stdin)value+=chunk;const rows=JSON.parse(value);if(!rows.some(row=>row.target?.package_name==="kr.feeledu.attendance"))process.exit(1);console.log("Android site association verified.");'

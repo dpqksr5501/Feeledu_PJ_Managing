@@ -14,6 +14,13 @@ import type { RosterEntry } from "../shared/types.ts";
 import { api, ApiError, download } from "./api.ts";
 import { kioskStore, type Roster } from "./kiosk-store.ts";
 import { Alert, Brand } from "./ui.tsx";
+import {
+  useAppUpdate,
+  checkAppUpdate,
+  applyAppUpdate,
+  isApplyingUpdate,
+  androidDownloadUrl,
+} from "./app-update.ts";
 type KioskNotice = { kind: "success" | "review" | "local"; text: string };
 
 export default function Kiosk() {
@@ -34,7 +41,19 @@ export default function Kiosk() {
   const [message, setMessage] = useState<KioskNotice | null>(null);
   const [busy, setBusy] = useState(false);
   const flushing = useRef(false);
-  const [update, setUpdate] = useState<ServiceWorkerRegistration | null>(null);
+  const update = useAppUpdate();
+  const lastActivity = useRef(Date.now());
+  const writing = useRef(false);
+  const safeToUpdate = useRef<() => Promise<boolean>>(async () => false);
+  safeToUpdate.current = async () =>
+    !writing.current &&
+    !busy &&
+    !flushing.current &&
+    !digits &&
+    !selected &&
+    !code &&
+    loaded &&
+    (await kioskStore.queue()).length === 0;
   const [revoked, setRevoked] = useState(false);
   useEffect(() => {
     if (message?.kind !== "success" || pending > 0) return;
@@ -130,17 +149,24 @@ export default function Kiosk() {
     return () => clearInterval(timer);
   }, []);
   useEffect(() => {
-    if (!("serviceWorker" in navigator) || !import.meta.env.PROD) return;
-    void navigator.serviceWorker.getRegistration().then((reg) => {
-      if (!reg) return;
-      if (reg.waiting) setUpdate(reg);
-      reg.addEventListener("updatefound", () => {
-        reg.installing?.addEventListener("statechange", () => {
-          if (reg.waiting && navigator.serviceWorker.controller) setUpdate(reg);
-        });
-      });
-    });
+    const active = () => {
+      lastActivity.current = Date.now();
+    };
+    window.addEventListener("pointerdown", active);
+    window.addEventListener("keydown", active);
+    return () => {
+      window.removeEventListener("pointerdown", active);
+      window.removeEventListener("keydown", active);
+    };
   }, []);
+  useEffect(() => {
+    if (!update.ready) return;
+    const timer = setInterval(() => {
+      if (!document.hidden && Date.now() - lastActivity.current >= 60000)
+        void applyAppUpdate(() => safeToUpdate.current());
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [update.ready]);
   useEffect(() => {
     if (!digits && !selected) return;
     const timer = setTimeout(() => {
@@ -151,6 +177,7 @@ export default function Kiosk() {
     return () => clearTimeout(timer);
   }, [digits, selected]);
   const input = useCallback((key: string) => {
+    if (isApplyingUpdate()) return;
     setMessage(null);
     setError("");
     setSelected(null);
@@ -173,6 +200,8 @@ export default function Kiosk() {
   }, [token, busy, selected, input]);
   async function pair(event: React.SubmitEvent) {
     event.preventDefault();
+    if (writing.current || isApplyingUpdate()) return;
+    writing.current = true;
     setBusy(true);
     setError("");
     try {
@@ -189,11 +218,14 @@ export default function Kiosk() {
     } catch (err) {
       setError((err as Error).message);
     } finally {
+      writing.current = false;
       setBusy(false);
     }
   }
   async function clock(action: "in" | "out") {
-    if (!selected || busy || revoked) return;
+    if (!selected || busy || revoked || writing.current || isApplyingUpdate())
+      return;
+    writing.current = true;
     setBusy(true);
     setError("");
     try {
@@ -215,6 +247,7 @@ export default function Kiosk() {
     } catch {
       setError("기기에 기록을 저장하지 못했습니다. 관리자에게 알려 주세요.");
     } finally {
+      writing.current = false;
       setBusy(false);
     }
   }
@@ -260,6 +293,14 @@ export default function Kiosk() {
       <header className="kiosk-top">
         <Brand />
         <div className="row">
+          <a
+            className="text-button"
+            href={androidDownloadUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Download size={16} /> 앱 다운로드
+          </a>
           <span className={`connection ${online ? "" : "offline"}`}>
             {online ? <Wifi size={16} /> : <WifiOff size={16} />}{" "}
             {online ? "연결됨" : "오프라인"}
@@ -493,20 +534,37 @@ export default function Kiosk() {
                   <Download size={14} /> 기록 보관
                 </button>
               )}
-              {update && (
+              <button
+                className="text-button"
+                disabled={update.checking || update.applying}
+                onClick={() =>
+                  void checkAppUpdate().then((ok) => {
+                    if (ok)
+                      setMessage({
+                        kind: "local",
+                        text: "업데이트 확인 완료 · 새 버전은 준비되면 자동 적용됩니다.",
+                      });
+                  })
+                }
+              >
+                업데이트 확인
+              </button>
+              {update.error && <span role="status">{update.error}</span>}
+              {update.ready && (
                 <button
                   className="text-button"
-                  disabled={pending > 0}
-                  onClick={() => {
-                    update.waiting?.postMessage("SKIP_WAITING");
-                    navigator.serviceWorker.addEventListener(
-                      "controllerchange",
-                      () => location.reload(),
-                      { once: true },
-                    );
-                  }}
+                  disabled={
+                    pending > 0 ||
+                    busy ||
+                    update.applying ||
+                    !!digits ||
+                    !!selected
+                  }
+                  onClick={() =>
+                    void applyAppUpdate(() => safeToUpdate.current())
+                  }
                 >
-                  업데이트 적용
+                  {update.applying ? "업데이트 중…" : "업데이트 적용"}
                 </button>
               )}
               <a href="/admin">관리자</a>

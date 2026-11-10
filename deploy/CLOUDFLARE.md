@@ -33,6 +33,18 @@ npm run test:cloud:e2e
 
 ## 배포
 
+### 현재 자동 업데이트 경로 — 2026-11-10
+
+작업 브랜치에서 검증한 코드를 `main`에 반영하면 `.github/workflows/ci.yml`이 타입·API/급여·Node 및 Cloudflare 브라우저 검증을 통과한 `dist`를 보관하고 같은 커밋의 서버 코드와 함께 기존 Worker에 배포합니다. 오래된 커밋의 늦은 CI 완료가 최신 배포를 덮어쓰지 않도록 현재 main HEAD를 검사하고 배포를 직렬화합니다. PR과 작업 브랜치에서는 공개 배포하지 않습니다. 검증 실패 시 배포 job이 실행되지 않습니다.
+
+GitHub 저장소의 암호화 Secret `CLOUDFLARE_API_TOKEN`과 Variable `CLOUDFLARE_ACCOUNT_ID`를 사용합니다. 사용자가 2026-11-10에 명시적으로 허용한 후 Cloudflare 설정의 **이 Worker만 배포 가능한 Individual Workers Editor 토큰**을 생성했습니다. 기존 로컬 OAuth 토큰을 GitHub에 복사하지 않았습니다. 초기 계정 설정 코드·운영 DB·앱 서명 비밀값도 소스나 배포 artifact에 포함하지 않습니다.
+
+설치용 APK는 [GitHub Releases](https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/latest)에 별도로 제공합니다. Android와 사이트의 인증서 연결 파일은 공개 정적 파일입니다. 화면·산식 업데이트는 같은 서버 배포로 반영하고, 네이티브 패키지 업데이트는 새 버전 태그·같은 서명으로 제공합니다.
+
+### 수동 배포·최초 이전 도구 이력
+
+아래 이전 도구는 비어 있는 새 환경용 절차입니다. 현재 운영 DB는 이미 설정됐고 사용자는 기존 PC 정보 이전을 거절했으므로 현재 DB에 실행하지 않습니다. 일반 수정에는 위 자동 배포 경로를 사용합니다.
+
 1. Cloudflare 무료 계정에 공식 Wrangler OAuth로 로그인합니다. 로그인·권한 동의는 사용자가 완료합니다. 현재 CLI는 지정한 범위에 `offline_access`를 자동 추가하므로 이 권한도 사용자 승인이 필요합니다. 비밀번호·인증코드는 채팅으로 보내지 않습니다.
 2. `npm run cloud:deploy`로 배포합니다. 최초에는 운영 비밀값이 없어 API가 503으로 응답하며 임의의 초기 계정 등록을 허용하지 않습니다.
 3. 강한 임의 문자열 `SETUP_TOKEN`과 일회용 `MIGRATION_TOKEN`을 **Wrangler secret bulk의 표준 입력**으로 설정합니다. 값은 소스·명령 인수·출력·추적 로그에 남기지 않습니다.

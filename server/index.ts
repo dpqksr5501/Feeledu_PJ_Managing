@@ -37,6 +37,13 @@ let devServer: { close: () => Promise<void> } | undefined;
 if (production) {
   if (!existsSync("dist/index.html"))
     throw new Error("먼저 npm run build를 실행해 주세요.");
+  app.get("/.well-known/assetlinks.json", (_req, res) =>
+    res
+      .type("application/json")
+      .sendFile(resolve("dist/.well-known/assetlinks.json"), {
+        dotfiles: "allow",
+      }),
+  );
   app.use(
     express.static(resolve("dist"), {
       index: false,

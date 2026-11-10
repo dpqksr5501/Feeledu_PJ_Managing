@@ -4,6 +4,10 @@
 
 **무료 클라우드 운영:** [관리자 화면](https://feeledu-attendance.feeledu-pj-managing.workers.dev/admin) · [태블릿 출퇴근](https://feeledu-attendance.feeledu-pj-managing.workers.dev/kiosk). PC가 꺼져 있어도 같은 서버를 사용합니다. 사용자가 새 시작을 선택해 기존 로컬 계정·직원·급여는 이전하지 않았습니다. [Cloudflare 운영·백업 안내](deploy/CLOUDFLARE.md)를 참고하세요.
 
+**Android APK 설치:** [GitHub Releases](https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/latest)에서 `feeledu-attendance.apk`를 내려받아 설치합니다. [APK 직접 다운로드](https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/latest/download/feeledu-attendance.apk). Google Android Browser Helper의 검증된 Trusted Web Activity로 같은 서버를 실행합니다. 브라우저 설치 메뉴를 찾을 필요가 없습니다. 자세한 빌드·서명·릴리즈 절차는 [android/README.md](android/README.md)를 참고하세요.
+
+**지속 배포:** 작업 브랜치에서 수정·검증한 뒤 `main`에 반영하면 GitHub Actions가 타입·31개 테스트·빌드·Node/Cloudflare 브라우저 검증을 통과한 결과물을 기존 Worker에 자동 배포합니다. Android 패키지는 `android-v버전` 태그에서 별도로 빌드·서명·검사해 GitHub Releases에 공개합니다. 직원·급여 DB는 Git과 APK에 포함하지 않습니다.
+
 ## 태블릿·PC 관리
 
 태블릿은 `/kiosk`에서 출퇴근하고, 화면 아래 **관리자**로 같은 기기의 관리 화면을 엽니다. PC도 같은 서버의 `/admin`에 접속합니다. 두 기기는 직원·근무·시급·정산을 공유합니다. 태블릿 단독 DB로 분리하지 않습니다.
@@ -94,6 +98,8 @@ npm run dev
 - 재연결 후 입력 순서대로 전송하며 전송 대기 건수와 서버 저장 완료를 별도로 표시합니다.
 - 오프라인·전송 지연·기기 시각 차이·출퇴근 순서 충돌은 **관리자 확인 전 급여에 합산하지 않습니다.**
 - 관리자는 기기 시각을 확인하고 출근 → 퇴근 순서로 승인하거나 반려합니다. 기존 근무와 겹치면 수동 정정 후 반려할 수 있습니다.
+- 새 화면 버전은 실행 시·온라인 복귀·화면 복귀와 5분 주기로 확인합니다. 출퇴근 입력·연결 코드 입력·저장·전송 중이 아니고 실제 기기 대기열이 비어 있으며 1분간 조작이 없으면 자동 적용합니다. ‘업데이트 확인/적용’도 제공합니다. 새 버전 교체는 기존 IndexedDB와 연결 토큰을 지우지 않습니다.
+- 화면·계산 기능 변경은 서버 배포로 반영합니다. Android 패키지 자체 변경은 GitHub Releases의 새 APK를 기존 앱 위에 설치합니다. 매번 APK를 다시 설치하거나 앱을 삭제할 필요가 없습니다.
 - **태블릿 연결 해제 전에 전송 대기 0건을 확인하세요.** 연결 해제 후에는 새 입력·전송이 차단됩니다.
 - 미전송 기록은 **기록 보관**으로 JSON을 내보내고, 관리자 **근무기록 → 복구 파일 가져오기**에서 복구합니다(한 번에 최대 200건). 복구 후에도 승인해야 반영되며 같은 파일을 다시 가져와도 중복되지 않습니다.
 - 관리자 복구 완료 후 **복구 확인 후 재연결**로 새 코드를 입력합니다. 기존 대기열의 기기 보관본도 남깁니다.
@@ -159,7 +165,7 @@ npm run test:e2e
 
 API·계산 테스트는 권한·로그아웃·CSRF·중복 번호·날짜·겹친 근무·동시 수정·오프라인 승인/복구·소급 변경·월 경계·정산 보존·백업 복구를 검사합니다. 브라우저 테스트는 최초 설정부터 관리자·직원 등록, 연결, 출퇴근, 오프라인 새로고침·재전송·승인까지 실행합니다.
 
-테스트는 인메모리·임시 DB를 사용하며 실제 운영 DB에 테스트 계정을 넣지 않습니다. 브라우저 테스트 서버는 4173 포트를 사용합니다. GitHub Actions는 검사·테스트·빌드만 수행하고 자동 공개 배포는 연결하지 않았습니다.
+자동 테스트는 인메모리·임시 DB를 사용합니다. 브라우저 테스트 서버는 4173/4175 포트입니다. 사용자의 배포 후 수동 테스트 요청으로 공개 앱에 남긴 `[테스트]` 가상 직원·기록은 실제 급여 자료와 구분합니다. GitHub Actions는 `main` 검증 성공 후 기존 Cloudflare 서버를 자동 업데이트하며, APK는 별도 Android 릴리즈 워크플로로 공개합니다.
 
 Windows에서 로컬 실행·브라우저 검증했습니다. Linux Docker 빌드와 실제 안드로이드 기기는 별도 확인이 필요합니다.
 

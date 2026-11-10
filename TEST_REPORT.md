@@ -1,5 +1,13 @@
 # 테스트 결과 — 2026-11-08
 
+## Android·지속 배포 추가 검증 — 2026-11-10
+
+- GitHub에서 Android 1.0.0 APK를 실제 빌드했다. Android lint·APK 서명·사이트 공개 인증서 일치 검사와 전체 웹 검증을 통과해 `android-v1.0.0` 릴리즈를 게시했다. APK는 3,814,475 bytes이며 서명 정보·SHA256SUMS를 함께 제공한다.
+- 새 업데이트 코드의 타입·31개 API/급여/DB 테스트·운영 빌드·ESLint를 통과했다. Node 브라우저 검증은 2개 시나리오를 통과했다. 실제 새 SW를 설치한 상태에서 미전송 대기열이 자동 적용을 막고, 대기열을 비우면 유휴 상태에서 교체·새로고침되며 IndexedDB 데이터가 보존되는 것을 확인했다.
+- Cloudflare 브라우저 검증은 기존 전체 출퇴근 시나리오를 통과했다. dist 파일을 편집하는 SW 교체 시나리오는 Cloudflare dev watcher의 별도 새로고침과 충돌하므로 이 환경에서만 제외하고 Node에서 검증했다.
+- 서버 자동 배포는 main의 검증 결과물만 사용하며 작업 브랜치·PR·Android 태그는 공개 서버를 배포하지 않는다. 앱 서명 키와 Worker 전용 배포 토큰은 GitHub 암호화 Secrets에만 전달하고 소스·APK에는 포함하지 않았다.
+- Android 실물의 APK 설치·Digital Asset Links에 따른 주소창 숨김·출퇴근은 사용자 태블릿에서 확인해야 한다. 브라우저 설치 메뉴를 사용하지 않고 GitHub Releases의 APK로 설치한다.
+
 Windows / Node.js 24 / Chromium에서 수행했다. 실제 직원·급여 DB 대신 인메모리 또는 별도 임시 DB를 사용했다.
 
 ## 결과
