@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "kr.feeledu.attendance",
+      "sha256_cert_fingerprints": [
+        "B5:E8:A6:62:50:56:7E:7D:25:8A:00:E6:C2:AF:BF:04:E8:F5:CC:EC:6A:42:F3:6A:22:4E:00:5C:38:2B:7D:B3"
+      ]
+    }
+  }
+]

@@ -1,0 +1,39 @@
+plugins { id 'com.android.application' }
+
+def appVersion = new Properties()
+file('../version.properties').withInputStream { appVersion.load(it) }
+def signingPath = System.getenv('ANDROID_SIGNING_STORE_FILE')
+
+android {
+    namespace 'kr.feeledu.attendance'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'kr.feeledu.attendance'
+        minSdk 23
+        targetSdk 36
+        versionCode appVersion.getProperty('versionCode').toInteger()
+        versionName appVersion.getProperty('versionName')
+    }
+    if (signingPath) {
+        signingConfigs {
+            release {
+                storeFile file(signingPath)
+                storeType 'PKCS12'
+                storePassword System.getenv('ANDROID_SIGNING_PASSWORD')
+                keyAlias 'feeledu'
+                keyPassword System.getenv('ANDROID_SIGNING_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (signingPath) signingConfig signingConfigs.release
+        }
+    }
+    lint { abortOnError true }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.7.3'
+}
