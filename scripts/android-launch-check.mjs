@@ -12,7 +12,6 @@ const launch = (data) =>
     "shell",
     "am",
     "start",
-    "-W",
     "-a",
     "android.intent.action.MAIN",
     "-c",
