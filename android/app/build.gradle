@@ -13,6 +13,7 @@ android {
         targetSdk 36
         versionCode appVersion.getProperty('versionCode').toInteger()
         versionName appVersion.getProperty('versionName')
+        testInstrumentationRunner 'kr.feeledu.attendance.IconSmokeTest'
     }
     if (signingPath) {
         signingConfigs {
@@ -32,6 +33,7 @@ android {
         }
     }
     lint { abortOnError true }
+    testBuildType 'release'
 }
 
 dependencies {

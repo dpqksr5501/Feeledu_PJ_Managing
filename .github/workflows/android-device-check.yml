@@ -1,0 +1,88 @@
+name: Android installation and icon checks
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published APK tag to test
+        default: android-v1.0.1
+        required: true
+  workflow_call:
+    inputs:
+      source:
+        type: string
+        default: artifact
+    secrets:
+      ANDROID_SIGNING_KEY:
+        required: true
+      ANDROID_SIGNING_PASSWORD:
+        required: true
+permissions:
+  contents: read
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [23, 29, 36]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+      - name: Restore signing identity for the test runner
+        env:
+          SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+        run: |
+          test -n "$SIGNING_KEY"
+          printf '%s' "$SIGNING_KEY" | base64 --decode > "$RUNNER_TEMP/feeledu-release.p12"
+          chmod 600 "$RUNNER_TEMP/feeledu-release.p12"
+      - name: Build a matching instrumentation test APK
+        env:
+          ANDROID_SIGNING_STORE_FILE: ${{ runner.temp }}/feeledu-release.p12
+          ANDROID_SIGNING_PASSWORD: ${{ secrets.ANDROID_SIGNING_PASSWORD }}
+        run: gradle -p android --no-daemon assembleReleaseAndroidTest
+      - uses: actions/download-artifact@v4
+        if: inputs.source == 'artifact'
+        with:
+          name: android-release
+          path: release
+      - name: Download published APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_TAG: ${{ inputs.release_tag }}
+          APK_SOURCE: ${{ inputs.source }}
+        run: |
+          mkdir -p baseline release
+          gh release download android-v1.0.0 --repo "$GITHUB_REPOSITORY" --pattern feeledu-attendance.apk --dir baseline
+          if [ "$APK_SOURCE" != artifact ]; then
+            gh release download "$TEST_TAG" --repo "$GITHUB_REPOSITORY" --pattern feeledu-attendance.apk --dir release
+          fi
+      - name: Enable the hosted runner emulator
+        run: sudo chown "$USER" /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+          script: bash scripts/android-device-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-device-api-${{ matrix.api }}
+          path: android-smoke/
+          if-no-files-found: ignore
+      - name: Remove test signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/feeledu-release.p12"

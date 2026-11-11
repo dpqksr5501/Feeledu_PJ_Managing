@@ -71,9 +71,18 @@ jobs:
       - name: Remove runner signing material
         if: always()
         run: rm -f "$RUNNER_TEMP/feeledu-release.p12"
+  devices:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/android-v') || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/android-device-check.yml
+    with:
+      source: artifact
+    secrets:
+      ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+      ANDROID_SIGNING_PASSWORD: ${{ secrets.ANDROID_SIGNING_PASSWORD }}
   publish:
     if: startsWith(github.ref, 'refs/tags/android-v')
-    needs: [verify, build]
+    needs: [verify, build, devices]
     runs-on: ubuntu-latest
     permissions:
       contents: write
