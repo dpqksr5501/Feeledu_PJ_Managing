@@ -76,7 +76,11 @@ public final class IconSmokeTest extends Instrumentation {
         File apk = new File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "download-self-test.apk");
         if (apk.exists() && !apk.delete()) throw new IllegalStateException("Cannot reset the emulator download fixture");
         DownloadManager manager = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(origin + "/downloads/feeledu-attendance.apk"));
+        // Verify the primary, immutable GitHub release download. A live server deployment must not
+        // change the file between reading release metadata and completing the emulator download.
+        String downloadUrl = "https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/download/android-v"
+                + metadata.getString("version") + "/feeledu-attendance.apk";
+        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(downloadUrl));
         request.setDestinationUri(Uri.fromFile(apk));
         request.setTitle("Feeledu APK download self-test");
         request.setMimeType("application/vnd.android.package-archive");
@@ -95,7 +99,10 @@ public final class IconSmokeTest extends Instrumentation {
             Thread.sleep(250);
         }
         if (!complete) throw new IllegalStateException("Android download did not complete: status=" + status + ", reason=" + reason);
-        if (apk.length() != metadata.getLong("bytes")) throw new IllegalStateException("Android download size mismatch");
+        result.putString("download_url", downloadUrl);
+        result.putLong("download_expected_bytes", metadata.getLong("bytes"));
+        result.putLong("download_actual_bytes", apk.length());
+        if (apk.length() != metadata.getLong("bytes")) throw new IllegalStateException("Android download size mismatch: expected=" + metadata.getLong("bytes") + ", actual=" + apk.length());
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         try (InputStream input = new FileInputStream(apk)) {
             byte[] buffer = new byte[8192]; int read;

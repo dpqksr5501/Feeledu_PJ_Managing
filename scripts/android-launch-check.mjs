@@ -16,6 +16,8 @@ const launch = (data) =>
     "android.intent.action.MAIN",
     "-c",
     "android.intent.category.LAUNCHER",
+    "-f",
+    "0x10200000",
     "-n",
     component,
     ...(data ? ["-d", data] : []),
@@ -84,37 +86,46 @@ try {
     saveResult();
     for (const data of [null, null, "https://untrusted.invalid/phishing"]) {
       adb("shell", "input", "keyevent", "KEYCODE_HOME");
-      launch(data);
       await expect
         .poll(
           () =>
-            context
-              .pages()
-              .filter((page) =>
-                page
-                  .url()
-                  .startsWith(
-                    "https://feeledu-attendance.feeledu-pj-managing.workers.dev/kiosk",
-                  ),
-              ).length,
-          { timeout: 60000 },
-        )
-        .toBeGreaterThan(0);
-      const page = context
-        .pages()
-        .find((page) =>
-          page
-            .url()
-            .startsWith(
-              "https://feeledu-attendance.feeledu-pj-managing.workers.dev/kiosk",
+            /(?:mResumedActivity|topResumedActivity)[:=].*(?:com\.google\.android\.apps\.nexuslauncher|com\.android\.launcher3)\//.test(
+              adb("shell", "dumpsys", "activity", "activities"),
             ),
+          { timeout: 15000 },
+        )
+        .toBe(true);
+      // Wait for the home transition to settle before simulating a launcher tap.
+      adb("shell", "uiautomator", "dump", "/sdcard/home.xml");
+      result.lastLaunch = launch(data);
+      let xml = "";
+      try {
+        // Custom Tabs aren't consistently exposed as pages by older Chrome DevTools.
+        // Inspect the real foreground Android accessibility tree instead of a background tab.
+        await expect
+          .poll(
+            () => {
+              adb("shell", "uiautomator", "dump", "/sdcard/kiosk.xml");
+              xml = adb("shell", "cat", "/sdcard/kiosk.xml");
+              return (
+                xml.includes("태블릿 연결") && xml.includes("태블릿 연결 코드")
+              );
+            },
+            { timeout: 60000 },
+          )
+          .toBe(true);
+      } finally {
+        writeFileSync(
+          `android-smoke/kiosk-launch-${result.launches + 1}.xml`,
+          xml,
         );
-      await expect(
-        page.getByRole("heading", { name: "태블릿 연결", exact: true }),
-      ).toBeVisible({ timeout: 60000 });
-      await expect(
-        page.getByRole("textbox", { name: "태블릿 연결 코드" }),
-      ).toBeVisible();
+        adb("shell", "screencap", "-p", "/sdcard/kiosk-foreground.png");
+        adb(
+          "pull",
+          "/sdcard/kiosk-foreground.png",
+          `android-smoke/kiosk-foreground-${result.launches + 1}.png`,
+        );
+      }
       await expect
         .poll(
           () =>
@@ -124,15 +135,6 @@ try {
           { timeout: 30000 },
         )
         .toBe(true);
-      await page.screenshot({
-        path: `android-smoke/kiosk-launch-${result.launches + 1}.png`,
-      });
-      adb("shell", "screencap", "-p", "/sdcard/kiosk-foreground.png");
-      adb(
-        "pull",
-        "/sdcard/kiosk-foreground.png",
-        `android-smoke/kiosk-foreground-${result.launches + 1}.png`,
-      );
       result.launches++;
     }
     result.kiosk = "PASS";

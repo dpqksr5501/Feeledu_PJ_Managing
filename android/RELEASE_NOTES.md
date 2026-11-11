@@ -1,8 +1,8 @@
 <img src="https://feeledu-attendance.feeledu-pj-managing.workers.dev/brand/feeledu-logo.png" width="200" alt="FEEL EDU" />
 
-안드로이드 태블릿용 **필에듀 출퇴근 1.0.3**입니다. FEEL EDU 로고를 사용합니다.
+안드로이드 태블릿용 **필에듀 출퇴근 1.0.4**입니다. FEEL EDU 로고를 사용합니다.
 
-**[설치 파일 받기](https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/download/android-v1.0.3/feeledu-attendance.apk)** · 아래 Assets에서도 선택할 수 있습니다.
+**[설치 파일 받기](https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/download/android-v1.0.4/feeledu-attendance.apk)** · 아래 Assets에서도 선택할 수 있습니다.
 
 - 아이콘을 눌러도 바로 종료되던 문제 수정: Android Browser Helper에 필요한 화면 등록 누락을 보완했습니다.
 - 브라우저를 사용할 수 없을 때 복구 안내와 다시 시도 버튼을 표시합니다.

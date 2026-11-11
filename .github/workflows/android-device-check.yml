@@ -4,7 +4,7 @@ on:
     inputs:
       release_tag:
         description: Published APK tag to test
-        default: android-v1.0.3
+        default: android-v1.0.4
         required: true
   workflow_call:
     inputs:
