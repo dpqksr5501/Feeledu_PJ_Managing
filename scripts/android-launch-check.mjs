@@ -5,7 +5,8 @@ import { writeFileSync } from "node:fs";
 const adb = (...args) =>
   execFileSync("adb", args, { encoding: "utf8", timeout: 30000 });
 const api = Number(adb("shell", "getprop", "ro.build.version.sdk").trim());
-const component = "kr.feeledu.attendance/.MainActivity";
+const component =
+  "kr.feeledu.attendance/com.google.androidbrowserhelper.trusted.LauncherActivity";
 const launch = (data) =>
   adb(
     "shell",
@@ -69,9 +70,24 @@ try {
       await expect(
         page.getByRole("textbox", { name: "태블릿 연결 코드" }),
       ).toBeVisible();
+      await expect
+        .poll(
+          () =>
+            /(?:mResumedActivity|topResumedActivity)[:=].*com\.android\.chrome\//.test(
+              adb("shell", "dumpsys", "activity", "activities"),
+            ),
+          { timeout: 30000 },
+        )
+        .toBe(true);
       await page.screenshot({
         path: `android-smoke/kiosk-launch-${result.launches + 1}.png`,
       });
+      adb("shell", "screencap", "-p", "/sdcard/kiosk-foreground.png");
+      adb(
+        "pull",
+        "/sdcard/kiosk-foreground.png",
+        `android-smoke/kiosk-foreground-${result.launches + 1}.png`,
+      );
       result.launches++;
     }
     result.kiosk = "PASS";

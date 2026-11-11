@@ -6,7 +6,7 @@ adb shell getprop ro.build.version.release | tee android-smoke/android-version.t
 timeout 120 adb install --no-streaming release/feeledu-attendance.apk | tee android-smoke/install-candidate-clean.txt
 grep -q Success android-smoke/install-candidate-clean.txt
 adb logcat -c
-adb shell am start -W -n kr.feeledu.attendance/.MainActivity > android-smoke/launch-clean.txt
+adb shell am start -W -n kr.feeledu.attendance/com.google.androidbrowserhelper.trusted.LauncherActivity > android-smoke/launch-clean.txt
 sleep 5
 adb logcat -d > android-smoke/launch-clean-logcat.txt
 if grep -E 'Process: kr.feeledu.attendance,|Unable to start activity ComponentInfo\{kr.feeledu.attendance' android-smoke/launch-clean-logcat.txt; then exit 1; fi
