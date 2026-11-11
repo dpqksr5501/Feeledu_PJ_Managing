@@ -21,7 +21,7 @@ test("an installed shell preserves its offline queue across a safe idle update",
       page.getByRole("img", { name: "FEEL EDU 앱 아이콘" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "APK 다운로드", exact: true }),
+      page.getByRole("link", { name: "보조 다운로드", exact: true }),
     ).toHaveAttribute("href", "/downloads/feeledu-attendance.apk");
     await page.setViewportSize({ width: 375, height: 812 });
     expect(

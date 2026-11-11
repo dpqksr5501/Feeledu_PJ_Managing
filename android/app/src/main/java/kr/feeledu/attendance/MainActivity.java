@@ -17,7 +17,7 @@ public final class MainActivity extends LauncherActivity {
         clean.setDataAndType(null, null);
         clean.replaceExtras((Bundle) null);
         clean.setClipData(null);
-        clean.removeFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        clean.setFlags(clean.getFlags() & ~(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION));
         setIntent(clean);
         super.onCreate(state);
     }
