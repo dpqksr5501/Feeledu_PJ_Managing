@@ -1,11 +1,28 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ArrowDownToLine, ArrowUpRight } from "lucide-react";
 import { androidDownloadUrl, androidReleaseUrl } from "./app-update.ts";
 import "./download.css";
+import {
+  parseAndroidRelease,
+  type AndroidRelease,
+} from "../shared/android-download.ts";
 
 export default function DownloadApp() {
+  const [release, setRelease] = useState<AndroidRelease | null>(null);
   useEffect(() => {
     document.title = "필에듀 출퇴근 · 앱 다운로드";
+    const controller = new AbortController();
+    void fetch("/android-release.json", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("Release unavailable");
+        return response.json();
+      })
+      .then((value) => setRelease(parseAndroidRelease(value)))
+      .catch(() => {});
+    return () => controller.abort();
   }, []);
   return (
     <main className="app-download-page">
@@ -18,8 +35,12 @@ export default function DownloadApp() {
           height="144"
         />
         <h1 id="download-title">필에듀 출퇴근</h1>
-        <p className="muted">Android 태블릿용</p>
-        <a className="button primary full" href={androidDownloadUrl}>
+        <p className="muted">
+          {release
+            ? `v${release.version} · ${(release.bytes / 1024 / 1024).toFixed(2)} MB`
+            : "Android 태블릿용"}
+        </p>
+        <a className="button primary full" href={androidDownloadUrl} download>
           <ArrowDownToLine size={19} /> APK 다운로드
         </a>
         <ol>
@@ -28,7 +49,11 @@ export default function DownloadApp() {
           <li>관리자에게 받은 8자리 코드로 연결</li>
         </ol>
         <div className="app-download-links">
-          <a href={androidReleaseUrl} target="_blank" rel="noopener noreferrer">
+          <a
+            href={release?.releaseUrl || androidReleaseUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             릴리즈 보기 <ArrowUpRight size={14} />
           </a>
           <a href="/admin">

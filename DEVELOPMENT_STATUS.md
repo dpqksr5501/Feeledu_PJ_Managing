@@ -4,6 +4,16 @@
 
 ## 최신 결정·변경
 
+### Chrome 100% 다운로드 대기·안드로이드 자체 점검 — 2026-11-11
+
+- 사용자가 ‘무한 설치’라고 표현한 증상은 추가 확인 결과 **Chrome 파일 다운로드가 100%에서 완료되지 않는 현상**이다. APK 설치 화면의 무한 진행과 구분한다. 모델은 갤럭시 탭 S11로 추정하나 사용자는 학원의 다른 Android 태블릿도 지원해야 한다고 명시했다. 모델·제조사·CPU 필터를 추가하지 않는다.
+- 공개 APK 1.0.1을 Android API 23/29/36(6/10/16) 에뮬레이터에서 실제 새 설치, 1.0.0→1.0.1 업데이트, 반복 설치했다. 모두 통과했고 설치된 패키지의 앱 아이콘을 Android PackageManager로 렌더링해 빨강·검정 로고와 안전 여백을 검사했다. GitHub 실행: https://github.com/dpqksr5501/Feeledu_PJ_Managing/actions/runs/42960912857 . 사용자의 Samsung Chrome에서 발생한 다운로드 대기를 이 검사로 재현했다고 주장하지 않는다.
+- `/downloads/feeledu-attendance.apk`에서 동일한 공개 릴리즈 APK를 **우리 도메인으로 직접 제공**한다. CI는 Android 릴리즈의 SHA-256·ZIP 헤더·파일 크기를 검증한 뒤 dist에 포함한다. APK를 Git에 커밋하거나 새로운 외부 저장소에 복사하지 않는다. 단일 파일 25MiB 제한을 검사한다.
+- Cloudflare static assets는 Range를 무시하므로 이 경로만 Worker 우선으로 처리한다. 정확한 Content-Length, APK MIME, 버전 파일명, 강한 ETag, HEAD, 206/416, If-Range 및 Android DownloadManager의 If-Match(412)를 지원한다. 파일/메타데이터가 없거나 HTML/크기가 틀리면 503을 반환해 오류 문서를 APK로 제공하지 않는다. SW 캐시/가로채기에서도 다운로드 경로를 제외한다.
+- Node와 Cloudflare의 브라우저에서 다운로드 완료 이벤트·파일 크기·SHA-256·재개 구간을 검사했다. API/급여/DB/다운로드 테스트는 35개이며 기존 전체 출퇴근·오프라인·정산 시나리오도 통과했다. 운영 의존성 npm audit 0건이다.
+- 구형 Chrome을 위한 빌드 target chrome100과 vh→dvh 높이 대체를 추가했다. APK minSdk와 브라우저 기능 지원은 별개이며 최신 Chrome을 받을 수 있는 Android 10+를 운영 권장으로 안내한다. Android 6은 기본 APK 설치/아이콘을 검증한 범위다.
+- 신규 APK 릴리즈는 버전별 설치 검사도 통과해야 publish하며, publish 이후 CI를 다시 실행해 같은 공개 APK가 우리 도메인에 반영되게 한다. 출퇴근/급여 DB·기기 연결·서명 키는 유지한다. 시스템 DownloadManager의 실제 완료/체크섬 검증을 API29/36 네이티브 테스트에 추가했으며, 직접 다운로드 공개 후 별도 실행 결과를 확인한다.
+
 ### FEEL EDU 앱 아이콘·다운로드 화면 — 2026-11-10
 
 - 사용자 원본 로고는 수정하지 않는다. 기존 앱 아이콘에 로고가 들어 있었으나 adaptive foreground가 확대되면 양끝이 잘릴 수 있어 XML에 16% inset을 추가했다. 설치/홈 화면/원형 아이콘에서 같은 로고가 보이게 유지한다. 패키지·서명·서버·기기 DB는 변경하지 않는다. 새 APK 버전은 1.0.1(versionCode 2)이다.

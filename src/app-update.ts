@@ -121,5 +121,4 @@ export function useAppUpdate() {
 
 export const androidReleaseUrl =
   "https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/latest";
-export const androidDownloadUrl =
-  androidReleaseUrl + "/download/feeledu-attendance.apk";
+export const androidDownloadUrl = "/downloads/feeledu-attendance.apk";

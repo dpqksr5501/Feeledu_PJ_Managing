@@ -320,6 +320,7 @@ textarea {
 }
 /* Admin shell */
 .admin-layout {
+  min-height: 100vh;
   min-height: 100dvh;
 }
 .sidebar {
@@ -975,6 +976,7 @@ td strong {
 .modal {
   width: 570px;
   max-width: 100%;
+  max-height: 90vh;
   max-height: 90dvh;
   overflow: auto;
   background: #fff;
@@ -1075,6 +1077,7 @@ td strong {
   display: flex;
   align-items: center;
   justify-content: center;
+  min-height: 100vh;
   min-height: 100dvh;
   background: var(--canvas);
 }
@@ -1136,6 +1139,7 @@ td strong {
   flex-shrink: 0;
 }
 .kiosk {
+  min-height: 100vh;
   min-height: 100dvh;
   background: #f5f5f5;
   display: flex;
@@ -1693,6 +1697,7 @@ td strong {
     padding: 14px;
   }
   .modal {
+    max-height: 94vh;
     max-height: 94dvh;
   }
   .form-body {

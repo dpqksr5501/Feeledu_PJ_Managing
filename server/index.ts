@@ -13,6 +13,7 @@ import { openDb } from "./db.ts";
 import { secret } from "./security.ts";
 import { createApp } from "./app.ts";
 import { seoulDate } from "../shared/time.ts";
+import { serveAndroidDownload } from "./android-download.ts";
 
 const production = process.env.NODE_ENV === "production";
 const dbPath = process.env.DB_PATH || "data/feeledu.db";
@@ -33,6 +34,7 @@ if (!db.prepare("SELECT id FROM admins LIMIT 1").get())
     `\n최초 운영자 설정 코드: ${setupToken}\n관리자 화면에서 이 코드를 입력해 주세요.\n`,
   );
 const app = createApp({ db, setupToken, production });
+app.all("/downloads/{*file}", serveAndroidDownload);
 let devServer: { close: () => Promise<void> } | undefined;
 if (production) {
   if (!existsSync("dist/index.html"))

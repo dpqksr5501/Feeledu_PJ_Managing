@@ -18,6 +18,7 @@ import {
 import { seoulDate } from "../shared/time.ts";
 import { durableDatabase } from "./database.ts";
 import * as security from "./security.ts";
+import { androidDownload } from "../shared/android-download.ts";
 
 interface Env {
   ACADEMY: DurableObjectNamespace<Academy>;
@@ -158,6 +159,7 @@ export class Academy extends DurableObject<Env> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/downloads/")) return androidDownload(request, env.ASSETS);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
     const headers = new Headers(request.headers);
     headers.set(

@@ -4,6 +4,7 @@ on:
     branches: ["**"]
   pull_request:
   workflow_call:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -18,6 +19,10 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check
+      - name: Package the verified public APK for first-party downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/package-android-download.mjs
       - run: npm run cloud:check
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
@@ -30,7 +35,7 @@ jobs:
           retention-days: 7
   deploy:
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.workflow == 'Verify attendance app'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.workflow == 'Verify attendance app'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -70,4 +75,5 @@ jobs:
         if: steps.current.outputs.deploy == 'true'
         run: |
           curl --fail --retry 3 https://feeledu-attendance.feeledu-pj-managing.workers.dev/api/health
+          curl --fail --retry 3 --head https://feeledu-attendance.feeledu-pj-managing.workers.dev/downloads/feeledu-attendance.apk
           curl --fail --retry 3 https://feeledu-attendance.feeledu-pj-managing.workers.dev/.well-known/assetlinks.json | node --input-type=module -e 'let value="";for await(const chunk of process.stdin)value+=chunk;const rows=JSON.parse(value);if(!rows.some(row=>row.target?.package_name==="kr.feeledu.attendance"))process.exit(1);console.log("Android site association verified.");'

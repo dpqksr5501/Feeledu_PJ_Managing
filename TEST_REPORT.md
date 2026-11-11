@@ -1,5 +1,13 @@
 # 테스트 결과 — 2026-11-08
 
+## 다운로드 100% 대기 추가 검증 — 2026-11-11
+
+- 공개 APK 1.0.1을 Android 6·10·16 에뮬레이터에 실제 설치했다. 새 설치·1.0.0에서 업데이트·같은 파일 재설치·PackageManager 앱 아이콘 렌더링을 세 환경 모두 통과했다. https://github.com/dpqksr5501/Feeledu_PJ_Managing/actions/runs/42960912857
+- 사용자의 증상은 Chrome 다운로드가 100%에서 완료 처리되지 않는 현상이다. 사용자의 Samsung Chrome·네트워크에서 동일 현상을 직접 재현하지 못했으며 APK 설치 검사 성공과 구분한다.
+- 새 직접 다운로드의 Content-Length·파일명·APK MIME·HEAD·ETag·206/416·If-Match/If-Range 및 HTML/크기 불일치 차단을 검증한다. 전체 API·급여·DB·다운로드 테스트 35개를 통과했다.
+- Node 및 Cloudflare Chromium에서 **다운로드 완료 → 파일 크기 → SHA-256 일치**, 동일 출처 유지, 128바이트 재개 구간을 확인했다. Node 브라우저 3개 통과, Cloudflare 2개 통과·SW 파일 편집 검사 1개 제외(기존 사유 동일). 이전의 오프라인·정산·관리자 시나리오도 통과했다.
+- 운영 의존성 npm audit 0건. 실제 Android DownloadManager 완료·체크섬 검사는 API29/36 테스트에 추가했으며 새 직접 경로 배포 후 별도 실행해 확인한다.
+
 ## Android·지속 배포 추가 검증 — 2026-11-10
 
 - GitHub에서 Android 1.0.0 APK를 실제 빌드했다. Android lint·APK 서명·사이트 공개 인증서 일치 검사와 전체 웹 검증을 통과해 `android-v1.0.0` 릴리즈를 게시했다. APK는 3,814,475 bytes이며 서명 정보·SHA256SUMS를 함께 제공한다.

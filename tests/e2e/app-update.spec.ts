@@ -22,10 +22,7 @@ test("an installed shell preserves its offline queue across a safe idle update",
     ).toBeVisible();
     await expect(
       page.getByRole("link", { name: "APK 다운로드", exact: true }),
-    ).toHaveAttribute(
-      "href",
-      "https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/latest/download/feeledu-attendance.apk",
-    );
+    ).toHaveAttribute("href", "/downloads/feeledu-attendance.apk");
     await page.setViewportSize({ width: 375, height: 812 });
     expect(
       await page.evaluate(
