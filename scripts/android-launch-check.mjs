@@ -47,14 +47,35 @@ console.log(
   "Browser fixture:",
   JSON.stringify({ api, chromeInstalled, version: result.browser }),
 );
+function readUi(path) {
+  adb("shell", "uiautomator", "dump", path);
+  const xml = adb("shell", "cat", path);
+  // Android's first full-screen tutorial is a non-security onboarding notice.
+  // Only acknowledge its observed OK control; never dismiss permission or security dialogs.
+  if (xml.includes("immersive_cling_title")) {
+    const button = xml.match(
+      /resource-id="(?:android|com\.android\.systemui):id\/ok"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/,
+    );
+    if (button) {
+      adb(
+        "shell",
+        "input",
+        "tap",
+        String(Math.round((Number(button[1]) + Number(button[3])) / 2)),
+        String(Math.round((Number(button[2]) + Number(button[4])) / 2)),
+      );
+      return "";
+    }
+  }
+  return xml;
+}
 async function recovery(name) {
   let xml = "";
   try {
     await expect
       .poll(
         () => {
-          adb("shell", "uiautomator", "dump", "/sdcard/browser-required.xml");
-          xml = adb("shell", "cat", "/sdcard/browser-required.xml");
+          xml = readUi("/sdcard/browser-required.xml");
           return (
             xml.includes("브라우저 확인 필요") && xml.includes("다시 시도")
           );
@@ -85,6 +106,7 @@ try {
     result.stage = "kiosk-launch";
     saveResult();
     for (const data of [null, null, "https://untrusted.invalid/phishing"]) {
+      readUi("/sdcard/before-home.xml");
       adb("shell", "input", "keyevent", "KEYCODE_HOME");
       await expect
         .poll(
@@ -96,7 +118,7 @@ try {
         )
         .toBe(true);
       // Wait for the home transition to settle before simulating a launcher tap.
-      adb("shell", "uiautomator", "dump", "/sdcard/home.xml");
+      readUi("/sdcard/home.xml");
       result.lastLaunch = launch(data);
       let xml = "";
       try {
@@ -105,8 +127,7 @@ try {
         await expect
           .poll(
             () => {
-              adb("shell", "uiautomator", "dump", "/sdcard/kiosk.xml");
-              xml = adb("shell", "cat", "/sdcard/kiosk.xml");
+              xml = readUi("/sdcard/kiosk.xml");
               return (
                 xml.includes("태블릿 연결") && xml.includes("태블릿 연결 코드")
               );
