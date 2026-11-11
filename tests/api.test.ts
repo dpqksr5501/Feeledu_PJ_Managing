@@ -323,7 +323,13 @@ describe("API integrity and permissions", () => {
   test("downloads a consistent SQLite backup that can be restored", async () => {
     await f.employee();
     const response = await fetch(f.base + "/api/admin/backup", {
-      headers: { Cookie: f.cookie },
+      method: "POST",
+      headers: {
+        Cookie: f.cookie,
+        "Content-Type": "application/json",
+        "X-Requested-With": "Feeledu",
+      },
+      body: JSON.stringify({ current: "test-only-password-123" }),
     });
     expect(response.status).toBe(200);
     const data = Buffer.from(await response.arrayBuffer());

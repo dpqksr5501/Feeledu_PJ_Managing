@@ -6,6 +6,7 @@ import { Alert, Brand, Field, Loading } from "./ui.tsx";
 import Kiosk from "./Kiosk.tsx";
 import AdminApp from "./admin/AdminApp.tsx";
 import DownloadApp from "./DownloadApp.tsx";
+import { MIN_PASSWORD_LENGTH } from "../shared/password-format.ts";
 
 function Auth({ setup, done }: { setup: boolean; done: () => void }) {
   const [busy, setBusy] = useState(false);
@@ -62,11 +63,14 @@ function Auth({ setup, done }: { setup: boolean; done: () => void }) {
                 placeholder="관리자 아이디"
               />
             </Field>
-            <Field label="비밀번호" hint={setup ? "12자 이상" : undefined}>
+            <Field
+              label="비밀번호"
+              hint={setup ? `${MIN_PASSWORD_LENGTH}자 이상` : undefined}
+            >
               <input
                 name="password"
                 type="password"
-                minLength={setup ? 12 : undefined}
+                minLength={setup ? MIN_PASSWORD_LENGTH : undefined}
                 maxLength={128}
                 required
                 autoComplete={setup ? "new-password" : "current-password"}
@@ -122,7 +126,7 @@ export default function App() {
       void load();
   }, []);
   useEffect(() => {
-    if (!admin?.shared_tablet) return;
+    if (!admin) return;
     let timer: ReturnType<typeof setTimeout>;
     let lastPing = 0;
     let alive = true;
@@ -137,7 +141,7 @@ export default function App() {
     };
     const active = () => {
       clearTimeout(timer);
-      timer = setTimeout(lock, 2 * 60000);
+      timer = setTimeout(lock, (admin.shared_tablet ? 2 : 30) * 60000);
       if (Date.now() - lastPing > 30000) {
         lastPing = Date.now();
         void send("/admin/activity", {}).catch((error: unknown) => {
@@ -147,7 +151,7 @@ export default function App() {
       }
     };
     const hidden = () => {
-      if (document.hidden) lock();
+      if (document.hidden && admin.shared_tablet) lock();
     };
     window.addEventListener("pointerdown", active);
     window.addEventListener("keydown", active);

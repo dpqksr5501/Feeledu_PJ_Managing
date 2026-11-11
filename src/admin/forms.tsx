@@ -589,12 +589,12 @@ export function AccountForm({ account }: { account?: Admin }) {
       )}
       <Field
         label={account ? "비밀번호 재설정 (선택)" : "비밀번호"}
-        hint="12자 이상"
+        hint={`${MIN_PASSWORD_LENGTH}자 이상`}
       >
         <input
           name="password"
           type="password"
-          minLength={12}
+          minLength={MIN_PASSWORD_LENGTH}
           maxLength={128}
           required={!account}
           autoComplete="new-password"
@@ -643,7 +643,7 @@ export function PasswordForm() {
         <input
           name="password"
           type="password"
-          minLength={12}
+          minLength={MIN_PASSWORD_LENGTH}
           maxLength={128}
           required
           autoComplete="new-password"
@@ -652,3 +652,4 @@ export function PasswordForm() {
     </ActionForm>
   );
 }
+import { MIN_PASSWORD_LENGTH } from "../../shared/password-format.ts";

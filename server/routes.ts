@@ -13,10 +13,21 @@ import { calculatePayroll } from "./payroll.ts";
 import { attendanceWeek } from "./attendance.ts";
 import { addDays, dayStart, seoulDate } from "../shared/time.ts";
 import type { Admin, ClockEvent, Device, Shift } from "../shared/types.ts";
+import { MIN_PASSWORD_LENGTH } from "../shared/password-format.ts";
+import {
+  initializeAuthState,
+  authBackoff,
+  recordAuthFailure,
+  clearAuthFailures,
+  PC_IDLE_MS,
+  TABLET_IDLE_MS,
+  SESSION_MAX_MS,
+} from "./auth-state.ts";
 export type Security = {
   hash(value: string): string;
   passwordHash(password: string): string;
   passwordMatches(password: string, stored: string): boolean;
+  passwordNeedsUpgrade(stored: string): boolean;
   secret(): string;
   secureEqual(a: string, b: string): boolean;
 };
@@ -49,7 +60,10 @@ const reason = z
   .max(500);
 const password = z
   .string()
-  .min(12, "비밀번호는 12자 이상이어야 합니다.")
+  .min(
+    MIN_PASSWORD_LENGTH,
+    `비밀번호는 ${MIN_PASSWORD_LENGTH}자 이상이어야 합니다.`,
+  )
   .max(128);
 const account = z.object({
   username: z.string().regex(/^[a-zA-Z0-9_.-]{3,40}$/),
@@ -91,7 +105,12 @@ const period = z
       v.from <= v.to && dayStart(v.to) - dayStart(v.from) <= 366 * 86400000,
     "기간은 순서대로 최대 1년까지 지정해 주세요.",
   );
-type Authed = Request & { admin?: Admin; device?: Device };
+type Authed = Request & {
+  admin?: Admin;
+  device?: Device;
+  sessionHash?: string;
+  sessionDeadline?: string;
+};
 const one = <T>(db: Db, sql: string, ...args: (string | number | null)[]) =>
   db.prepare(sql).get(...args) as T | undefined;
 
@@ -117,22 +136,61 @@ export function registerRoutes(
     secureCookie?: boolean;
   },
 ) {
-  const { hash, passwordHash, passwordMatches, secret, secureEqual } = security;
+  const {
+    hash,
+    passwordHash,
+    passwordMatches,
+    passwordNeedsUpgrade,
+    secret,
+    secureEqual,
+  } = security;
+  initializeAuthState(db);
+  const dummyPasswordHash = passwordHash(secret());
+  function checkBackoff(res: Response, key: string) {
+    const seconds = authBackoff(db, key);
+    if (seconds) {
+      res.setHeader("Retry-After", seconds);
+      fail(429, "잠시 후 다시 시도해 주세요.");
+    }
+  }
   const requireAdmin = (req: Authed, _res: Response, next: NextFunction) => {
     const token = req.headers.cookie
       ?.split(";")
       .map((s) => s.trim())
       .find((s) => s.startsWith("feeledu_session="))
       ?.slice("feeledu_session=".length);
-    const admin =
+    const row =
       token &&
-      one<Admin>(
+      one<Admin & { session_expiry: string; absolute_deadline: string | null }>(
         db,
-        "SELECT a.id,a.username,a.name,a.role,a.active,s.shared_tablet FROM sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=? AND s.expires_at>? AND a.active=1",
+        "SELECT a.id,a.username,a.name,a.role,a.active,s.shared_tablet,s.expires_at AS session_expiry,b.absolute_expires_at AS absolute_deadline FROM sessions s JOIN admins a ON a.id=s.admin_id LEFT JOIN session_deadlines b ON b.token_hash=s.token_hash WHERE s.token_hash=? AND s.expires_at>? AND (b.absolute_expires_at IS NULL OR b.absolute_expires_at>?) AND a.active=1",
         hash(token),
         new Date().toISOString(),
+        new Date().toISOString(),
       );
-    if (!admin) return next(new HttpError(401, "관리자 로그인이 필요합니다."));
+    if (!row) return next(new HttpError(401, "관리자 로그인이 필요합니다."));
+    const { session_expiry, absolute_deadline, ...admin } = row;
+    req.sessionHash = hash(token!);
+    req.sessionDeadline =
+      absolute_deadline ||
+      (admin.shared_tablet
+        ? new Date(Date.now() + SESSION_MAX_MS).toISOString()
+        : session_expiry);
+    if (!absolute_deadline) {
+      db.prepare("INSERT OR IGNORE INTO session_deadlines VALUES(?,?)").run(
+        req.sessionHash,
+        req.sessionDeadline,
+      );
+      db.prepare("UPDATE sessions SET expires_at=? WHERE token_hash=?").run(
+        new Date(
+          Math.min(
+            Date.parse(session_expiry),
+            Date.now() + (admin.shared_tablet ? TABLET_IDLE_MS : PC_IDLE_MS),
+          ),
+        ).toISOString(),
+        req.sessionHash,
+      );
+    }
     req.admin = admin;
     next();
   };
@@ -175,9 +233,13 @@ export function registerRoutes(
       hash(token),
       adminId,
       new Date(
-        Date.now() + (sharedTablet ? 2 * 60000 : 12 * 3600000),
+        Date.now() + (sharedTablet ? TABLET_IDLE_MS : PC_IDLE_MS),
       ).toISOString(),
       Number(sharedTablet),
+    );
+    db.prepare("INSERT INTO session_deadlines VALUES(?,?)").run(
+      hash(token),
+      new Date(Date.now() + SESSION_MAX_MS).toISOString(),
     );
     res.cookie("feeledu_session", token, {
       httpOnly: true,
@@ -228,6 +290,8 @@ export function registerRoutes(
         sharedTablet: z.boolean().optional().default(false),
       })
       .parse(req.body);
+    const attemptKey = hash("login:" + body.username);
+    checkBackoff(res, attemptKey);
     const admin = one<Admin & { password_hash: string }>(
       db,
       "SELECT * FROM admins WHERE username=? AND active=1",
@@ -235,9 +299,18 @@ export function registerRoutes(
     );
     const match = passwordMatches(
       body.password,
-      admin?.password_hash || passwordHash("dummy-password-check"),
+      admin?.password_hash || dummyPasswordHash,
     );
-    if (!admin || !match) fail(401, "아이디 또는 비밀번호를 확인해 주세요.");
+    if (!admin || !match) {
+      recordAuthFailure(db, attemptKey);
+      fail(401, "아이디 또는 비밀번호를 확인해 주세요.");
+    }
+    clearAuthFailures(db, attemptKey);
+    if (passwordNeedsUpgrade(admin.password_hash))
+      db.prepare("UPDATE admins SET password_hash=? WHERE id=?").run(
+        passwordHash(body.password),
+        admin.id,
+      );
     login(res, admin.id, body.sharedTablet);
     audit(db, admin.id, "login", admin.id, {});
     res.json({ ok: true });
@@ -262,31 +335,36 @@ export function registerRoutes(
     res.json(attendanceWeek(db, anchor));
   });
   admin.post("/activity", (req: Authed, res) => {
-    if (req.admin!.shared_tablet) {
-      const token = req.headers.cookie
-        ?.split(";")
-        .map((value) => value.trim())
-        .find((value) => value.startsWith("feeledu_session="))
-        ?.slice(16);
-      if (token)
-        db.prepare("UPDATE sessions SET expires_at=? WHERE token_hash=?").run(
-          new Date(Date.now() + 2 * 60000).toISOString(),
-          hash(token),
-        );
-    }
+    db.prepare("UPDATE sessions SET expires_at=? WHERE token_hash=?").run(
+      new Date(
+        Math.min(
+          Date.now() + (req.admin!.shared_tablet ? TABLET_IDLE_MS : PC_IDLE_MS),
+          Date.parse(req.sessionDeadline!),
+        ),
+      ).toISOString(),
+      req.sessionHash!,
+    );
     res.json({ ok: true });
   });
-  admin.post("/password", (req: Authed, res) => {
-    const body = z
-      .object({ current: z.string().max(128), password })
-      .parse(req.body);
+  function proveCurrentPassword(req: Authed, res: Response, current: string) {
+    const key = hash("proof:" + req.admin!.id);
+    checkBackoff(res, key);
     const stored = one<{ password_hash: string }>(
       db,
       "SELECT password_hash FROM admins WHERE id=?",
       req.admin!.id,
     )!;
-    if (!passwordMatches(body.current, stored.password_hash))
+    if (!passwordMatches(current, stored.password_hash)) {
+      recordAuthFailure(db, key);
       fail(403, "현재 비밀번호가 일치하지 않습니다.");
+    }
+    clearAuthFailures(db, key);
+  }
+  admin.post("/password", sensitiveLimit, (req: Authed, res) => {
+    const body = z
+      .object({ current: z.string().max(128), password })
+      .parse(req.body);
+    proveCurrentPassword(req, res, body.current);
     transaction(db, () => {
       db.prepare("UPDATE admins SET password_hash=? WHERE id=?").run(
         passwordHash(body.password),
@@ -1043,7 +1121,14 @@ export function registerRoutes(
     });
     res.json({ ok: true });
   });
-  admin.get("/backup", owner, async (req: Authed, res) => {
+  admin.get("/backup", owner, () =>
+    fail(403, "현재 비밀번호를 확인한 후 백업을 받을 수 있습니다."),
+  );
+  admin.post("/backup", owner, sensitiveLimit, async (req: Authed, res) => {
+    const body = z
+      .object({ current: z.string().min(1).max(128) })
+      .parse(req.body);
+    proveCurrentPassword(req, res, body.current);
     await downloadBackup(req, res);
   });
   app.post("/api/kiosk/pair", sensitiveLimit, (req, res) => {

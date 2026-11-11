@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { formatTime, seoulDate } from "../../shared/time.ts";
 import type { Policy } from "../../shared/types.ts";
-import { api } from "../api.ts";
+import { api, ApiError } from "../api.ts";
 import { Alert, Empty, Field, Help } from "../ui.tsx";
 import { useAdmin } from "./context.tsx";
 import { AccountForm, PasswordForm } from "./forms.tsx";
@@ -310,13 +310,78 @@ export default function SettingsPage() {
               <h2>데이터 백업</h2>
               <p>계정·급여 정보 포함 · 기기 밖에 별도 보관</p>
             </div>
-            <a className="button secondary" href="/api/admin/backup" download>
+            <button
+              className="button secondary"
+              onClick={() => open("전체 백업", <BackupForm />)}
+            >
               <Download size={17} /> 전체 백업 받기
-            </a>
+            </button>
           </section>
         </>
       )}
     </div>
+  );
+}
+function BackupForm() {
+  const { close, refresh } = useAdmin();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/admin/backup", {
+        method: "POST",
+        credentials: "same-origin",
+        signal: AbortSignal.timeout(60000),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Requested-With": "Feeledu",
+        },
+        body: JSON.stringify({ current: new FormData(form).get("current") }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new ApiError(
+          body.error || "백업을 받지 못했습니다.",
+          response.status,
+        );
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `feeledu-${seoulDate()}.${response.headers.get("Content-Type")?.includes("json") ? "json" : "db"}`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      form.reset();
+      close();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) refresh();
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <form onSubmit={submit} className="form-stack">
+      <Field label="현재 비밀번호">
+        <input
+          name="current"
+          type="password"
+          autoComplete="current-password"
+          maxLength={128}
+          required
+          autoFocus
+        />
+      </Field>
+      {error && <Alert kind="error">{error}</Alert>}
+      <button className="button primary" disabled={busy}>
+        <Download size={17} /> {busy ? "준비 중…" : "백업 받기"}
+      </button>
+    </form>
   );
 }
 function PolicyForm({ initial }: { initial: Policy }) {
