@@ -1,4 +1,9 @@
 import { useState, type FormEvent } from "react";
+import {
+  MIN_PASSWORD_LENGTH,
+  PASSWORD_HINT,
+  PASSWORD_INPUT_PATTERN,
+} from "../../shared/password-format.ts";
 import type {
   Admin,
   Employee,
@@ -589,12 +594,14 @@ export function AccountForm({ account }: { account?: Admin }) {
       )}
       <Field
         label={account ? "비밀번호 재설정 (선택)" : "비밀번호"}
-        hint={`${MIN_PASSWORD_LENGTH}자 이상`}
+        hint={PASSWORD_HINT}
       >
         <input
           name="password"
           type="password"
           minLength={MIN_PASSWORD_LENGTH}
+          pattern={PASSWORD_INPUT_PATTERN}
+          title={PASSWORD_HINT}
           maxLength={128}
           required={!account}
           autoComplete="new-password"
@@ -639,11 +646,13 @@ export function PasswordForm() {
           autoComplete="current-password"
         />
       </Field>
-      <Field label="새 비밀번호">
+      <Field label="새 비밀번호" hint={PASSWORD_HINT}>
         <input
           name="password"
           type="password"
           minLength={MIN_PASSWORD_LENGTH}
+          pattern={PASSWORD_INPUT_PATTERN}
+          title={PASSWORD_HINT}
           maxLength={128}
           required
           autoComplete="new-password"
@@ -652,4 +661,3 @@ export function PasswordForm() {
     </ActionForm>
   );
 }
-import { MIN_PASSWORD_LENGTH } from "../../shared/password-format.ts";

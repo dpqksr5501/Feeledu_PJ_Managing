@@ -16,9 +16,14 @@ test("operator administration, paired tablet, offline reload and manager access"
   await admin.getByLabel("초기 설정 코드").fill("test-only-setup-token");
   await admin.getByLabel("운영자 이름").fill("테스트 운영자");
   await admin.getByLabel("아이디", { exact: true }).fill("qa-owner");
-  await admin
-    .getByLabel("비밀번호", { exact: true })
-    .fill("qa-owner-password-123");
+  const initialPassword = admin.getByLabel("비밀번호", { exact: true });
+  await initialPassword.fill("abcdefghij");
+  expect(
+    await initialPassword.evaluate(
+      (field: HTMLInputElement) => field.validity.patternMismatch,
+    ),
+  ).toBe(true);
+  await admin.getByLabel("비밀번호", { exact: true }).fill("Qa_owner1!");
   await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
   await expect(
     admin.getByRole("heading", { name: "대시보드", exact: true }),
@@ -482,7 +487,7 @@ test("operator administration, paired tablet, offline reload and manager access"
   await expect(
     dialog.getByText("현재 비밀번호가 일치하지 않습니다."),
   ).toBeVisible();
-  await dialog.getByLabel("현재 비밀번호").fill("qa-owner-password-123");
+  await dialog.getByLabel("현재 비밀번호").fill("Qa_owner1!");
   const backupDownload = admin.waitForEvent("download");
   await dialog.getByRole("button", { name: "백업 받기", exact: true }).click();
   const backup = await backupDownload;

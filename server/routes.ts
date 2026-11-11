@@ -13,7 +13,10 @@ import { calculatePayroll } from "./payroll.ts";
 import { attendanceWeek } from "./attendance.ts";
 import { addDays, dayStart, seoulDate } from "../shared/time.ts";
 import type { Admin, ClockEvent, Device, Shift } from "../shared/types.ts";
-import { MIN_PASSWORD_LENGTH } from "../shared/password-format.ts";
+import {
+  MIN_PASSWORD_LENGTH,
+  PASSWORD_SPECIAL_CHARACTER,
+} from "../shared/password-format.ts";
 import {
   initializeAuthState,
   authBackoff,
@@ -64,7 +67,11 @@ const password = z
     MIN_PASSWORD_LENGTH,
     `비밀번호는 ${MIN_PASSWORD_LENGTH}자 이상이어야 합니다.`,
   )
-  .max(128);
+  .max(128)
+  .regex(
+    PASSWORD_SPECIAL_CHARACTER,
+    "비밀번호에 특수문자를 1개 이상 포함해 주세요.",
+  );
 const account = z.object({
   username: z.string().regex(/^[a-zA-Z0-9_.-]{3,40}$/),
   name: text,

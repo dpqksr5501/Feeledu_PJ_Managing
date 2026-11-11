@@ -6,7 +6,11 @@ import { Alert, Brand, Field, Loading } from "./ui.tsx";
 import Kiosk from "./Kiosk.tsx";
 import AdminApp from "./admin/AdminApp.tsx";
 import DownloadApp from "./DownloadApp.tsx";
-import { MIN_PASSWORD_LENGTH } from "../shared/password-format.ts";
+import {
+  MIN_PASSWORD_LENGTH,
+  PASSWORD_HINT,
+  PASSWORD_INPUT_PATTERN,
+} from "../shared/password-format.ts";
 
 function Auth({ setup, done }: { setup: boolean; done: () => void }) {
   const [busy, setBusy] = useState(false);
@@ -63,14 +67,13 @@ function Auth({ setup, done }: { setup: boolean; done: () => void }) {
                 placeholder="관리자 아이디"
               />
             </Field>
-            <Field
-              label="비밀번호"
-              hint={setup ? `${MIN_PASSWORD_LENGTH}자 이상` : undefined}
-            >
+            <Field label="비밀번호" hint={setup ? PASSWORD_HINT : undefined}>
               <input
                 name="password"
                 type="password"
                 minLength={setup ? MIN_PASSWORD_LENGTH : undefined}
+                pattern={setup ? PASSWORD_INPUT_PATTERN : undefined}
+                title={setup ? PASSWORD_HINT : undefined}
                 maxLength={128}
                 required
                 autoComplete={setup ? "new-password" : "current-password"}

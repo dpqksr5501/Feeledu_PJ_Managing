@@ -145,3 +145,94 @@ test("rejects cross-origin writes even with an authenticated cookie", async () =
   });
   expect(response.status).toBe(403);
 });
+
+test("enforces ten characters and a real special character for new, reset and changed passwords", async () => {
+  for (const password of [
+    "Abcdefg1!",
+    "abcdefghij",
+    "1234567890",
+    "abcdefghi ",
+    "가나다라마바사아자차",
+  ]) {
+    expect(
+      (
+        await f.request("/admin/accounts", {
+          username: "policy-manager",
+          name: "기준 확인",
+          password,
+        })
+      ).status,
+    ).toBe(400);
+  }
+  const created = await f.request("/admin/accounts", {
+    username: "policy-manager",
+    name: "기준 확인",
+    password: "Abcdefgh1!",
+  });
+  expect(created.status).toBe(201);
+  const path = `/admin/accounts/${created.data.id}`;
+  expect(
+    (
+      await f.request(
+        path,
+        { name: "기준 확인", active: true, password: "abcdefghij" },
+        "PATCH",
+      )
+    ).status,
+  ).toBe(400);
+  expect(
+    (
+      await f.request(
+        path,
+        { name: "기준 확인", active: true, password: "Otherpass!" },
+        "PATCH",
+      )
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await f.request("/login", {
+        username: "policy-manager",
+        password: "Otherpass!",
+      })
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await f.request("/admin/password", {
+        current: "test-only-password-123",
+        password: "abcdefghij",
+      })
+    ).status,
+  ).toBe(400);
+  expect(
+    (
+      await f.request("/admin/password", {
+        current: "test-only-password-123",
+        password: "Abcdefgh1!",
+      })
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await f.request("/login", {
+        username: "test-owner",
+        password: "Abcdefgh1!",
+      })
+    ).status,
+  ).toBe(200);
+});
+
+test("existing credentials remain usable even if they do not meet the new creation rule", async () => {
+  f.db
+    .prepare("UPDATE admins SET password_hash=? WHERE username=?")
+    .run(native.passwordHash("olderpass"), "test-owner");
+  expect(
+    (
+      await f.request("/login", {
+        username: "test-owner",
+        password: "olderpass",
+      })
+    ).status,
+  ).toBe(200);
+});

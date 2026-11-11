@@ -1,4 +1,8 @@
-export const MIN_PASSWORD_LENGTH = 15;
+export const MIN_PASSWORD_LENGTH = 10;
+// Letters (including Korean), numbers and whitespace do not count as special characters.
+export const PASSWORD_SPECIAL_CHARACTER = /[\p{P}\p{S}]/u;
+export const PASSWORD_INPUT_PATTERN = String.raw`.*[\p{P}\p{S}].*`;
+export const PASSWORD_HINT = `${MIN_PASSWORD_LENGTH}자 이상 · 특수문자 1개 이상`;
 export const PASSWORD_SCRYPT = { N: 16384, r: 8, p: 5, dkLen: 64 };
 export function parsePasswordHash(stored: string) {
   if (typeof stored !== "string") return null;
