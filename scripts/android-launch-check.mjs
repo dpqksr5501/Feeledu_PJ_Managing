@@ -69,6 +69,17 @@ function readUi(path) {
   }
   return xml;
 }
+async function closeDebugContext() {
+  const previous = context;
+  context = undefined;
+  // Some Chrome versions restart their DevTools context when switching into a TWA.
+  // Cleanup must not mask an assertion or fail after the real UI checks succeeded.
+  await previous
+    ?.close()
+    .catch((error) =>
+      console.log("Debug context cleanup:", error.message.split("\n")[0]),
+    );
+}
 async function recovery(name) {
   let xml = "";
   try {
@@ -128,13 +139,49 @@ try {
           .poll(
             () => {
               xml = readUi("/sdcard/kiosk.xml");
+              const input = xml.match(
+                /<node\b[^>]*class="android\.widget\.EditText"[^>]*>/,
+              )?.[0];
+              // Older Chrome exposes the editable control without its aria-label in Android AX.
               return (
-                xml.includes("태블릿 연결") && xml.includes("태블릿 연결 코드")
+                xml.includes("태블릿 연결") &&
+                xml.includes('text="연결"') &&
+                !!input?.includes('enabled="true"')
               );
             },
             { timeout: 60000 },
           )
           .toBe(true);
+        if (result.launches === 0) {
+          const input = xml.match(
+            /<node\b[^>]*class="android\.widget\.EditText"[^>]*>/,
+          )?.[0];
+          if (!input) throw new Error("Connection-code field disappeared");
+          const bounds = input.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+          if (!bounds)
+            throw new Error("Editable connection-code field has no bounds");
+          adb(
+            "shell",
+            "input",
+            "tap",
+            String(Math.round((Number(bounds[1]) + Number(bounds[3])) / 2)),
+            String(Math.round((Number(bounds[2]) + Number(bounds[4])) / 2)),
+          );
+          // Local form editing only; never submit a code or mutate production attendance data.
+          adb("shell", "input", "text", "0000");
+          await expect
+            .poll(
+              () =>
+                /<node\b[^>]*text="0000"[^>]*class="android\.widget\.EditText"/.test(
+                  readUi("/sdcard/typed-code.xml"),
+                ),
+              { timeout: 15000 },
+            )
+            .toBe(true);
+          adb("shell", "input", "keyevent", "67", "67", "67", "67");
+          adb("shell", "input", "keyevent", "KEYCODE_BACK");
+          result.inputEditing = "PASS";
+        }
       } finally {
         writeFileSync(
           `android-smoke/kiosk-launch-${result.launches + 1}.xml`,
@@ -157,10 +204,10 @@ try {
         )
         .toBe(true);
       result.launches++;
+      saveResult();
     }
     result.kiosk = "PASS";
-    await context.close();
-    context = undefined;
+    await closeDebugContext();
   } else {
     result.kiosk = "NOT_RUN_UNSUPPORTED_IMAGE_BROWSER";
     launch();
@@ -174,11 +221,18 @@ try {
   await recovery("browser-required");
   result.missingBrowser = "PASS";
   result.stage = "complete";
+} catch (error) {
+  result.error = error.message;
+  throw error;
 } finally {
+  saveResult();
   if (chromeInstalled) adb("shell", "pm", "enable", "com.android.chrome");
   adb("shell", "am", "clear-debug-app");
-  await context?.close();
-  await device?.close();
-  saveResult();
+  await closeDebugContext();
+  await device
+    ?.close()
+    .catch((error) =>
+      console.log("Device cleanup:", error.message.split("\n")[0]),
+    );
 }
 console.log(JSON.stringify(result));
