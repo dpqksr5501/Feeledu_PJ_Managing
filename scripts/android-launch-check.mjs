@@ -179,7 +179,13 @@ try {
             )
             .toBe(true);
           adb("shell", "input", "keyevent", "67", "67", "67", "67");
-          adb("shell", "input", "keyevent", "KEYCODE_BACK");
+          if (
+            /(?:mInputShown|mIsInputViewShown)=true/.test(
+              adb("shell", "dumpsys", "input_method"),
+            )
+          ) {
+            adb("shell", "input", "keyevent", "KEYCODE_BACK");
+          }
           result.inputEditing = "PASS";
         }
       } finally {
