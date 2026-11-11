@@ -9,8 +9,20 @@ test("Chrome finishes the first-party APK download and HTTP byte ranges resume t
     .get("/android-release.json")
     .then((r) => r.json());
   await page.goto("/download");
+  await expect(
+    page.getByRole("link", { name: "GitHub 릴리즈 열기", exact: true }),
+  ).toHaveAttribute(
+    "href",
+    "https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/latest",
+  );
+  await expect(
+    page.getByRole("link", { name: "최신 APK 받기", exact: true }),
+  ).toHaveAttribute(
+    "href",
+    "https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/latest/download/feeledu-attendance.apk",
+  );
   const completed = page.waitForEvent("download");
-  await page.getByRole("link", { name: "APK 다운로드", exact: true }).click();
+  await page.getByRole("link", { name: "보조 다운로드", exact: true }).click();
   const download = await completed;
   const path = await download.path();
   expect(await download.failure()).toBeNull();

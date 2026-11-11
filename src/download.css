@@ -31,6 +31,9 @@
 .app-download-card > .button {
   min-height: 52px;
 }
+.app-download-card > .button + .button {
+  margin-top: 10px;
+}
 .app-download-card ol {
   margin: 26px 0;
   padding-left: 22px;

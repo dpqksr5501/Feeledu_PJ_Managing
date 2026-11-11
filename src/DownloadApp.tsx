@@ -40,21 +40,24 @@ export default function DownloadApp() {
             ? `v${release.version} · ${(release.bytes / 1024 / 1024).toFixed(2)} MB`
             : "Android 태블릿용"}
         </p>
-        <a className="button primary full" href={androidDownloadUrl} download>
-          <ArrowDownToLine size={19} /> APK 다운로드
+        <a className="button primary full" href={androidReleaseUrl}>
+          <ArrowUpRight size={19} /> GitHub 릴리즈 열기
+        </a>
+        <a
+          className="button secondary full"
+          href={`${androidReleaseUrl}/download/feeledu-attendance.apk`}
+        >
+          <ArrowDownToLine size={19} /> 최신 APK 받기
         </a>
         <ol>
-          <li>다운로드한 파일을 열어 설치</li>
+          <li>릴리즈의 Assets에서 feeledu-attendance.apk 선택</li>
+          <li>다운로드한 파일을 열어 설치·업데이트</li>
           <li>홈 화면의 필에듀 출퇴근 실행</li>
           <li>관리자에게 받은 8자리 코드로 연결</li>
         </ol>
         <div className="app-download-links">
-          <a
-            href={release?.releaseUrl || androidReleaseUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            릴리즈 보기 <ArrowUpRight size={14} />
+          <a href={androidDownloadUrl} download>
+            보조 다운로드 <ArrowDownToLine size={14} />
           </a>
           <a href="/admin">
             관리자 화면 <ArrowUpRight size={14} />

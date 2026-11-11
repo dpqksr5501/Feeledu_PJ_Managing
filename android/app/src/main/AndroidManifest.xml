@@ -11,7 +11,7 @@
         android:theme="@android:style/Theme.Translucent.NoTitleBar">
         <meta-data android:name="asset_statements" android:resource="@string/asset_statements" />
         <activity
-            android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
+            android:name=".MainActivity"
             android:exported="true"
             android:label="필에듀 출퇴근">
             <meta-data android:name="android.support.customtabs.trusted.DEFAULT_URL"
@@ -30,6 +30,14 @@
                 <data android:scheme="https" android:host="feeledu-attendance.feeledu-pj-managing.workers.dev" android:pathPrefix="/kiosk" />
             </intent-filter>
         </activity>
+        <!-- Browser Helper toggles this component on every API 25+ launch. It must exist. -->
+        <activity android:name="com.google.androidbrowserhelper.trusted.ManageDataLauncherActivity"
+            android:exported="false">
+            <meta-data android:name="android.support.customtabs.trusted.MANAGE_SPACE_URL"
+                android:value="https://feeledu-attendance.feeledu-pj-managing.workers.dev/kiosk" />
+        </activity>
+        <activity android:name=".BrowserRequiredActivity" android:exported="false"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <activity android:name="com.google.androidbrowserhelper.trusted.FocusActivity" android:exported="false" />
     </application>
 </manifest>

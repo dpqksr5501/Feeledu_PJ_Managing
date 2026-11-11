@@ -6,13 +6,13 @@
 
 **Android APK 설치:** [GitHub Releases](https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/latest)에서 `feeledu-attendance.apk`를 내려받아 설치합니다. [APK 직접 다운로드](https://github.com/dpqksr5501/Feeledu_PJ_Managing/releases/latest/download/feeledu-attendance.apk). Google Android Browser Helper의 검증된 Trusted Web Activity로 같은 서버를 실행합니다. 브라우저 설치 메뉴를 찾을 필요가 없습니다. 자세한 빌드·서명·릴리즈 절차는 [android/README.md](android/README.md)를 참고하세요.
 
-**지속 배포:** 작업 브랜치에서 수정·검증한 뒤 `main`에 반영하면 GitHub Actions가 타입·31개 테스트·빌드·Node/Cloudflare 브라우저 검증을 통과한 결과물을 기존 Worker에 자동 배포합니다. Android 패키지는 `android-v버전` 태그에서 별도로 빌드·서명·검사해 GitHub Releases에 공개합니다. 직원·급여 DB는 Git과 APK에 포함하지 않습니다.
+**지속 배포:** 작업 브랜치에서 수정·검증한 뒤 `main`에 반영하면 GitHub Actions가 타입·단위 테스트·빌드·Node/Cloudflare 브라우저 검증을 통과한 결과물을 기존 Worker에 자동 배포합니다. Android 패키지는 `android-v버전` 태그에서 별도로 빌드·서명·기기 검사 후 GitHub Releases에 공개합니다. 직원·급여 DB는 Git과 APK에 포함하지 않습니다.
 
 ## 태블릿·PC 관리
 
 로고가 있는 [앱 다운로드 화면](https://feeledu-attendance.feeledu-pj-managing.workers.dev/download)에서도 설치용 APK를 받을 수 있습니다. 설치 화면·홈 화면의 앱 아이콘과 다운로드 페이지는 사용자 제공 FEEL EDU 로고를 사용합니다. Android의 원형 아이콘에서도 글자가 잘리지 않도록 안전 여백을 둡니다.
 
-Chrome의 외부 다운로드 경로 문제를 줄이기 위해 **[우리 도메인에서 APK 직접 받기](https://feeledu-attendance.feeledu-pj-managing.workers.dev/downloads/feeledu-attendance.apk)**를 제공합니다. GitHub에 공개한 동일한 서명 APK이며 CI가 체크섬을 검증해 배포합니다. 화면에는 제공 중인 버전·크기를 표시합니다. 연결 중단 후 재개를 지원하고 APK는 서비스워커에 캐시하지 않습니다. 운영은 Android 10 이상과 최신 Chrome을 권장합니다. 특정 태블릿 모델에 제한하지 않습니다.
+**기본 배포 경로는 GitHub Releases입니다.** 릴리즈의 Assets에서 APK를 받거나 위의 최신 APK 링크를 누릅니다. [자체 서버 다운로드](https://feeledu-attendance.feeledu-pj-managing.workers.dev/downloads/feeledu-attendance.apk)는 보조 경로입니다. GitHub에 공개한 동일한 서명 APK이며 CI가 체크섬을 검증해 배포합니다. 화면에는 보조 파일의 버전·크기를 표시합니다. 연결 중단 후 재개를 지원하고 APK는 서비스워커에 캐시하지 않습니다. 운영은 Android 10 이상과 최신 Chrome을 권장합니다. 특정 태블릿 모델에 제한하지 않습니다.
 
 태블릿은 `/kiosk`에서 출퇴근하고, 화면 아래 **관리자**로 같은 기기의 관리 화면을 엽니다. PC도 같은 서버의 `/admin`에 접속합니다. 두 기기는 직원·근무·시급·정산을 공유합니다. 태블릿 단독 DB로 분리하지 않습니다.
 
