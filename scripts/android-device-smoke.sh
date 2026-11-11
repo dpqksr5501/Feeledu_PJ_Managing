@@ -36,4 +36,4 @@ if grep -E 'Process: kr.feeledu.attendance,|Unable to start activity ComponentIn
   echo 'Actual launcher execution failed.'
   exit 1
 fi
-echo 'Install, upgrade, icon, actual kiosk launch, repeat launch and missing-browser recovery passed (legacy API 23: native recovery only).'
+echo 'Install, upgrade, icon and browser checks passed. Modern browser fixtures verify the kiosk and repeat launch; legacy image browsers verify the update guide.'

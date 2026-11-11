@@ -28,14 +28,60 @@ const result = {
   launches: 0,
 };
 let device, context;
+const chromeInstalled = adb(
+  "shell",
+  "pm",
+  "path",
+  "com.android.chrome",
+).includes("package:");
+const chromeMajor = Number(result.browser?.split(".")[0] || 0);
+const saveResult = () =>
+  writeFileSync(
+    "android-smoke/launch-results.json",
+    JSON.stringify(result, null, 2),
+  );
+saveResult();
+console.log(
+  "Browser fixture:",
+  JSON.stringify({ api, chromeInstalled, version: result.browser }),
+);
+async function recovery(name) {
+  let xml = "";
+  try {
+    await expect
+      .poll(
+        () => {
+          adb("shell", "uiautomator", "dump", "/sdcard/browser-required.xml");
+          xml = adb("shell", "cat", "/sdcard/browser-required.xml");
+          return (
+            xml.includes("브라우저 확인 필요") && xml.includes("다시 시도")
+          );
+        },
+        { timeout: 30000 },
+      )
+      .toBe(true);
+  } finally {
+    writeFileSync(`android-smoke/${name}.xml`, xml);
+    adb("shell", "screencap", "-p", "/sdcard/browser-required.png");
+    adb("pull", "/sdcard/browser-required.png", `android-smoke/${name}.png`);
+  }
+}
 try {
-  if (api >= 29) {
+  if (api >= 35 && (!chromeInstalled || chromeMajor < 103))
+    throw new Error(
+      "Modern Android fixtures must exercise the actual kiosk, not just a recovery screen",
+    );
+  if (chromeInstalled && chromeMajor >= 103) {
+    result.stage = "browser-connection";
+    saveResult();
     // Disposable emulator only: skip Chrome's welcome wizard, never TLS or origin verification.
     adb("shell", "am", "set-debug-app", "--persistent", "com.android.chrome");
     [device] = await android.devices({ omitDriverInstall: true });
     if (!device) throw new Error("No emulator connected");
     device.setDefaultTimeout(60000);
     context = await device.launchBrowser({ pkg: "com.android.chrome" });
+    result.stage = "kiosk-launch";
+    saveResult();
     for (const data of [null, null, "https://untrusted.invalid/phishing"]) {
       adb("shell", "input", "keyevent", "KEYCODE_HOME");
       launch(data);
@@ -93,38 +139,23 @@ try {
     await context.close();
     context = undefined;
   } else {
-    result.kiosk = "NOT_RUN_LEGACY_CHROME";
+    result.kiosk = "NOT_RUN_UNSUPPORTED_IMAGE_BROWSER";
+    launch();
+    await recovery("unsupported-browser");
+    result.unsupportedBrowser = "PASS";
   }
   adb("shell", "am", "force-stop", "kr.feeledu.attendance");
-  adb("shell", "pm", "disable-user", "--user", "0", "com.android.chrome");
+  if (chromeInstalled)
+    adb("shell", "pm", "disable-user", "--user", "0", "com.android.chrome");
   launch();
-  let xml = "";
-  await expect
-    .poll(
-      () => {
-        adb("shell", "uiautomator", "dump", "/sdcard/browser-required.xml");
-        xml = adb("shell", "cat", "/sdcard/browser-required.xml");
-        return xml.includes("브라우저 확인 필요") && xml.includes("다시 시도");
-      },
-      { timeout: 30000 },
-    )
-    .toBe(true);
-  writeFileSync("android-smoke/browser-required.xml", xml);
-  adb("shell", "screencap", "-p", "/sdcard/browser-required.png");
-  adb(
-    "pull",
-    "/sdcard/browser-required.png",
-    "android-smoke/browser-required.png",
-  );
+  await recovery("browser-required");
   result.missingBrowser = "PASS";
+  result.stage = "complete";
 } finally {
-  adb("shell", "pm", "enable", "com.android.chrome");
+  if (chromeInstalled) adb("shell", "pm", "enable", "com.android.chrome");
   adb("shell", "am", "clear-debug-app");
   await context?.close();
   await device?.close();
-  writeFileSync(
-    "android-smoke/launch-results.json",
-    JSON.stringify(result, null, 2),
-  );
+  saveResult();
 }
 console.log(JSON.stringify(result));

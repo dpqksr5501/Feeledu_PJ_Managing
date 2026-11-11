@@ -4,7 +4,7 @@ on:
     inputs:
       release_tag:
         description: Published APK tag to test
-        default: android-v1.0.2
+        default: android-v1.0.3
         required: true
   workflow_call:
     inputs:
@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [23, 29, 36]
+        api: [23, 29, 35, 36]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
