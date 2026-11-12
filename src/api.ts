@@ -1,6 +1,10 @@
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  constructor(
+    message: string,
+    status: number,
+    public retryAfterMs = 0,
+  ) {
     super(message);
     this.status = status;
   }
@@ -10,8 +14,10 @@ export async function api<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const response = await fetch("/api" + path, {
-    signal: AbortSignal.timeout(10000),
     ...options,
+    signal: options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(10000)])
+      : AbortSignal.timeout(10000),
     credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
@@ -19,11 +25,23 @@ export async function api<T>(
       ...options.headers,
     },
   });
-  const body = await response.json().catch(() => ({}));
+  const body = await response.json().catch(() => {
+    // A proxy's HTML/empty 200 response is not a server acknowledgement.
+    if (response.ok)
+      throw new Error("서버 응답을 확인하지 못했습니다. 다시 연결합니다.");
+    return {};
+  });
   if (!response.ok)
     throw new ApiError(
       body.error || "요청을 처리하지 못했습니다.",
       response.status,
+      Math.max(
+        0,
+        Math.min(
+          3600000,
+          Number(response.headers.get("Retry-After")) * 1000 || 0,
+        ),
+      ),
     );
   return body as T;
 }

@@ -100,7 +100,7 @@ export default function WeeklyAttendance({
     void load();
     const timer = setInterval(() => {
       if (!document.hidden) void load();
-    }, 15000);
+    }, 60000);
     const resumed = () => {
       if (!document.hidden) void load();
     };

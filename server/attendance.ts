@@ -1,4 +1,5 @@
 import { getPolicy, type Db } from "./database.ts";
+import { shiftRangeSql } from "./shift-query.ts";
 import { addDays, dayStart, seoulDate, weekStart } from "../shared/time.ts";
 import { paidMillisecondsInRange } from "../shared/shift-duration.ts";
 import { holidayName } from "../shared/workdays.ts";
@@ -36,12 +37,11 @@ export function attendanceWeek(
       };
     });
   const shifts = db
-    .prepare(
-      "SELECT * FROM shifts WHERE voided=0 AND started_at<? AND (ended_at IS NULL OR ended_at>?) ORDER BY started_at",
-    )
+    .prepare(shiftRangeSql())
     .all(
       new Date(finish).toISOString(),
       new Date(begin).toISOString(),
+      new Date(finish).toISOString(),
     ) as unknown as Shift[];
   const pending = db
     .prepare(

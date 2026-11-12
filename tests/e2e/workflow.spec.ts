@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 
 test("operator administration, paired tablet, offline reload and manager access", async ({
   browser,
@@ -99,8 +99,20 @@ test("operator administration, paired tablet, offline reload and manager access"
     )
     .toBe(true);
   await selectPerson();
-  await kiosk.getByRole("button", { name: "출근" }).click();
+  const burstIds = new Set<string>();
+  const trackClock = (request: import("@playwright/test").Request) => {
+    if (request.url().endsWith("/api/kiosk/events"))
+      burstIds.add(request.postDataJSON().id);
+  };
+  kiosk.on("request", trackClock);
+  await kiosk
+    .getByRole("button", { name: "출근" })
+    .evaluate((button: HTMLButtonElement) => {
+      for (let i = 0; i < 20; i++) button.click();
+    });
   await expect(kiosk.getByText("출근 완료", { exact: true })).toBeVisible();
+  expect(burstIds.size).toBe(1);
+  kiosk.off("request", trackClock);
   await expect(kiosk.getByText("전송 대기 0건", { exact: true })).toBeVisible();
   await selectPerson();
   await kiosk.getByRole("button", { name: "퇴근" }).click();
@@ -131,10 +143,17 @@ test("operator administration, paired tablet, offline reload and manager access"
   await selectPerson();
   await kiosk.getByRole("button", { name: "퇴근" }).click();
   await expect(kiosk.getByText("전송 대기 2건", { exact: true })).toBeVisible();
+  const twin = await kioskContext.newPage();
+  await twin.goto("/kiosk");
+  await expect(twin.getByText("전송 대기 2건", { exact: true })).toBeVisible();
   await kioskContext.setOffline(false);
   await expect(kiosk.getByText("전송 대기 0건", { exact: true })).toBeVisible({
     timeout: 20000,
   });
+  await expect(twin.getByText("전송 대기 0건", { exact: true })).toBeVisible({
+    timeout: 20000,
+  });
+  await twin.close();
   await admin.getByRole("button", { name: "근무기록", exact: true }).click();
   await admin.getByRole("button", { name: "새로고침", exact: true }).click();
   await expect(admin.locator(".review-row")).toHaveCount(2);
@@ -257,9 +276,55 @@ test("operator administration, paired tablet, offline reload and manager access"
     },
     { times: 1 },
   );
+  // A rate-limit response must preserve the queued ID and block online-event storms.
+  await kiosk.route(
+    "**/api/kiosk/events",
+    async (route) => {
+      const committed = await route.fetch();
+      expect(committed.status()).toBe(200);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: "{}",
+      });
+    },
+    { times: 1 },
+  );
+  await kiosk.route(
+    "**/api/kiosk/events",
+    (route) =>
+      route.fulfill({
+        status: 429,
+        contentType: "application/json",
+        headers: { "Retry-After": "120" },
+        body: JSON.stringify({ error: "잠시 후 다시 시도해 주세요." }),
+      }),
+    { times: 1 },
+  );
+  let attempted = 0;
+  const countAttempt = (request: import("@playwright/test").Request) => {
+    if (request.url().endsWith("/api/kiosk/events")) attempted++;
+  };
+  kiosk.on("request", countAttempt);
   await selectPerson();
   await kiosk.getByRole("button", { name: "출근" }).click();
   await expect(kiosk.getByText("전송 대기 1건", { exact: true })).toBeVisible();
+  await expect(
+    kiosk.getByText("잠시 후 다시 시도해 주세요.", { exact: true }),
+  ).toBeVisible();
+  await kiosk.evaluate(() => {
+    for (let i = 0; i < 30; i++) window.dispatchEvent(new Event("online"));
+  });
+  expect(attempted).toBe(1);
+  kiosk.off("request", countAttempt);
+  await kiosk.reload();
+  await expect(kiosk.getByText("오프라인", { exact: true })).toBeVisible();
+  await expect(kiosk.getByText("전송 대기 1건", { exact: true })).toBeVisible();
+  expect(
+    (await (await adminContext.request.get(recordsUrl)).json()).length,
+  ).toBe(countBefore + 1);
+  await kiosk.reload();
+  await expect(kiosk.getByText("오프라인", { exact: true })).toBeVisible();
   await expect
     .poll(
       async () =>
@@ -496,6 +561,49 @@ test("operator administration, paired tablet, offline reload and manager access"
     /^feeledu-\d{4}-\d{2}-\d{2}\.(db|json)$/,
   );
   await expect(dialog).not.toBeVisible();
+  await expect(admin.getByText(/최근 생성 · \d{4}-/)).toBeVisible();
+  await admin.screenshot({ path: ".tmp/qa-backup.png", fullPage: true });
+  if (backup.suggestedFilename().endsWith(".json")) {
+    const backupPath = await backup.path();
+    expect(backupPath).not.toBeNull();
+    await admin.getByLabel("백업 파일 검사 (JSON)").setInputFiles(backupPath!);
+    await expect(admin.getByText(/검사값 정상 ·/)).toBeVisible();
+    const damaged = JSON.parse(readFileSync(backupPath!, "utf8"));
+    damaged.tables.employees[0].name = "손상 검증";
+    await admin.getByLabel("백업 파일 검사 (JSON)").setInputFiles({
+      name: "damaged.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(damaged)),
+    });
+    await expect(
+      admin.getByText("백업의 검사값이 일치하지 않습니다."),
+    ).toBeVisible();
+  }
+  // Exercise the actual Node/Cloudflare request limiter without writing attendance.
+  const burst = await Promise.all(
+    Array.from({ length: 185 }, () =>
+      kioskContext.request.get("/api/kiosk/roster"),
+    ),
+  );
+  const limited = burst.filter((response) => response.status() === 429);
+  expect(limited.length).toBeGreaterThan(0);
+  expect(Number(limited[0].headers()["retry-after"])).toBeGreaterThan(0);
+  // A record-page timer should not reload all employee, salary and audit history.
+  await admin.bringToFront();
+  await admin.clock.install();
+  await admin.getByRole("button", { name: "근무기록", exact: true }).click();
+  const reads: string[] = [];
+  admin.on("request", (request) => {
+    if (request.method() === "GET" && request.url().includes("/api/admin/"))
+      reads.push(new URL(request.url()).pathname);
+  });
+  await admin.clock.runFor(61000);
+  await expect
+    .poll(() => reads.filter((path) => path === "/api/admin/records").length)
+    .toBeGreaterThan(0);
+  expect(reads).not.toContain("/api/admin/employees");
+  expect(reads).not.toContain("/api/admin/payroll");
+  expect(reads).not.toContain("/api/admin/audit");
   expect(errors).toEqual([]);
   await managerContext.close();
   await kioskContext.close();

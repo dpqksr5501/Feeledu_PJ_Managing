@@ -37,7 +37,7 @@ import {
   ShiftForm,
   VoidForm,
 } from "./forms.tsx";
-import SettingsPage from "./SettingsPage.tsx";
+import SettingsPage, { BackupForm } from "./SettingsPage.tsx";
 import WeeklyAttendance from "./WeeklyAttendance.tsx";
 import { holidayName, workedDates } from "../../shared/workdays.ts";
 
@@ -171,9 +171,46 @@ export default function AdminApp({
   }, [from, to, revision, admin.role, today]);
   useEffect(() => {
     if (modal || tab !== "records") return;
-    const timer = setInterval(refresh, 60000);
-    return () => clearInterval(timer);
-  }, [refresh, modal, tab]);
+    const controller = new AbortController();
+    let fetching = false;
+    const load = async () => {
+      if (fetching || document.hidden) return;
+      fetching = true;
+      try {
+        const range = new URLSearchParams({ from, to });
+        const [records, reviews] = await Promise.all([
+          api<AdminData["records"]>("/admin/records?" + range, {
+            signal: controller.signal,
+          }),
+          api<AdminData["reviews"]>("/admin/reviews", {
+            signal: controller.signal,
+          }),
+        ]);
+        if (!controller.signal.aborted)
+          setData((previous) => previous && { ...previous, records, reviews });
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        if (err instanceof ApiError && err.status === 401) expired();
+        else
+          setNotice({
+            text: "자동 조회 실패 · 마지막 기록을 표시합니다.",
+            error: true,
+          });
+      } finally {
+        fetching = false;
+      }
+    };
+    const timer = setInterval(() => void load(), 60000);
+    const resumed = () => void load();
+    document.addEventListener("visibilitychange", resumed);
+    window.addEventListener("online", resumed);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", resumed);
+      window.removeEventListener("online", resumed);
+    };
+  }, [modal, tab, from, to, revision]);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(
@@ -652,13 +689,24 @@ export default function AdminApp({
             <div>
               <h1>{navigation.find((n) => n.id === tab)?.label}</h1>
             </div>
-            <button
-              className="button secondary"
-              onClick={refresh}
-              disabled={loading}
-            >
-              <RefreshCw size={16} className={loading ? "spin" : ""} /> 새로고침
-            </button>
+            <div className="row">
+              {admin.role === "owner" && data && (
+                <button
+                  className="button secondary"
+                  onClick={() => open("전체 백업", <BackupForm />)}
+                >
+                  <ArrowDownToLine size={16} /> 백업
+                </button>
+              )}
+              <button
+                className="button secondary"
+                onClick={refresh}
+                disabled={loading}
+              >
+                <RefreshCw size={16} className={loading ? "spin" : ""} />{" "}
+                새로고침
+              </button>
+            </div>
           </div>
           {data && ctx ? (
             <AdminContext.Provider value={ctx}>

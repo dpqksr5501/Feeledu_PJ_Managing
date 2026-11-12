@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { inspectSnapshot } from "../../shared/snapshot-format.ts";
 import {
   Check,
   Copy,
@@ -302,32 +303,117 @@ export default function SettingsPage() {
               <Empty>연결된 태블릿 없음</Empty>
             )}
           </section>
-          <section className="panel backup-panel">
-            <div className="section-icon">
-              <ShieldCheck size={22} />
-            </div>
-            <div>
-              <h2>데이터 백업</h2>
-              <p>계정·급여 정보 포함 · 기기 밖에 별도 보관</p>
-            </div>
-            <button
-              className="button secondary"
-              onClick={() => open("전체 백업", <BackupForm />)}
-            >
-              <Download size={17} /> 전체 백업 받기
-            </button>
-          </section>
+          <BackupPanel />
         </>
       )}
     </div>
   );
 }
-function BackupForm() {
+function BackupPanel() {
+  const { data, open } = useAdmin();
+  const [status, setStatus] = useState<string | null | undefined>(undefined);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState("");
+  const [checking, setChecking] = useState(false);
+  useEffect(() => {
+    let current = true;
+    api<{ createdAt: string | null }>("/admin/backup/status")
+      .then((value) => {
+        if (current) {
+          setStatus(value.createdAt);
+          setError("");
+        }
+      })
+      .catch(() => {
+        if (current) setError("백업 생성 이력을 조회하지 못했습니다.");
+      });
+    return () => {
+      current = false;
+    };
+  }, [data.audit]);
+  return (
+    <section className="panel form-stack">
+      <div className="panel-heading">
+        <div>
+          <h2>
+            <ShieldCheck size={19} /> 데이터 백업
+          </h2>
+          <p>
+            최근 생성 ·{" "}
+            {status === undefined
+              ? "조회 중"
+              : status
+                ? `${seoulDate(status)} ${formatTime(status)}`
+                : "없음"}
+          </p>
+        </div>
+        <button
+          className="button secondary"
+          onClick={() => open("전체 백업", <BackupForm />)}
+        >
+          <Download size={17} /> 전체 백업 받기
+        </button>
+      </div>
+      {status !== undefined &&
+        (!status || Date.now() - Date.parse(status) > 30 * 86400000) && (
+          <Alert>백업 파일을 받아 별도 보관해 주세요.</Alert>
+        )}
+      <small>
+        계정·급여 정보 포함 · 다운로드 완료와 저장 위치를 확인하세요.
+      </small>
+      <Field label="백업 파일 검사 (JSON)">
+        <input
+          type="file"
+          accept=".json,application/json"
+          disabled={checking}
+          onChange={async (event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            if (!file) return;
+            setError("");
+            setResult("");
+            setChecking(true);
+            try {
+              if (file.size > 50 * 1024 * 1024)
+                throw new Error("50MB 이하의 JSON 백업을 선택해 주세요.");
+              const checked = await inspectSnapshot(
+                JSON.parse(await file.text()),
+              );
+              setResult(
+                `검사값 정상 · ${seoulDate(checked.createdAt)} · 직원 ${checked.employees}명 · 근무 ${checked.shifts}건 · 출퇴근 ${checked.events}건`,
+              );
+            } catch (err) {
+              setError(
+                err instanceof Error &&
+                  /검사값|활성 운영자|50MB/.test(err.message)
+                  ? err.message
+                  : "올바른 필에듀 JSON 백업 파일을 선택해 주세요.",
+              );
+            } finally {
+              setChecking(false);
+            }
+          }}
+        />
+      </Field>
+      <small>
+        이 기기에서만 검사 · 서버 전송 없음 · 복원 시 연결 관계도 별도
+        검사합니다.
+      </small>
+      {checking && <span>검사 중…</span>}
+      {result && <Alert kind="success">{result}</Alert>}
+      {error && <Alert kind="error">{error}</Alert>}
+    </section>
+  );
+}
+export function BackupForm() {
   const { close, refresh } = useAdmin();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const submitting = useRef(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting.current) return;
+    submitting.current = true;
     const form = event.currentTarget;
     setBusy(true);
     setError("");
@@ -357,11 +443,13 @@ function BackupForm() {
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       form.reset();
+      refresh();
       close();
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) refresh();
       setError((error as Error).message);
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }

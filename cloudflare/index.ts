@@ -49,22 +49,30 @@ export class Academy extends DurableObject<Env> {
       );
       const now = Date.now();
       let remaining = 0;
+      let expiresAt = now + windowMs;
       transaction(this.db, () => {
         this.db
           .prepare("DELETE FROM cloud_rate_limits WHERE expires_at<=?")
           .run(now);
-        this.db
-          .prepare(
-            "INSERT INTO cloud_rate_limits VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1",
-          )
-          .run(key, now + windowMs);
-        const count = this.db
-          .prepare("SELECT count FROM cloud_rate_limits WHERE key=?")
-          .get(key)!.count as number;
-        remaining = maximum - count;
+        const entry = this.db
+          .prepare("SELECT count,expires_at FROM cloud_rate_limits WHERE key=?")
+          .get(key);
+        if (entry) expiresAt = Number(entry.expires_at);
+        remaining = maximum - Number(entry?.count ?? 0) - 1;
+        // Rejected bursts must not consume additional write quota.
+        if (remaining >= 0)
+          this.db
+            .prepare(
+              "INSERT INTO cloud_rate_limits VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1",
+            )
+            .run(key, expiresAt);
       });
       if (remaining < 0) {
         res
+          .set(
+            "Retry-After",
+            String(Math.max(1, Math.ceil((expiresAt - now) / 1000))),
+          )
           .status(429)
           .json({ error: "시도 횟수가 많습니다. 잠시 후 다시 시도해 주세요." });
         return;
@@ -159,7 +167,8 @@ export class Academy extends DurableObject<Env> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/downloads/")) return androidDownload(request, env.ASSETS);
+    if (url.pathname.startsWith("/downloads/"))
+      return androidDownload(request, env.ASSETS);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
     const headers = new Headers(request.headers);
     headers.set(

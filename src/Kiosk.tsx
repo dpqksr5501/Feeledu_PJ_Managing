@@ -13,6 +13,7 @@ import {
 import type { RosterEntry } from "../shared/types.ts";
 import { api, ApiError, download } from "./api.ts";
 import { kioskStore, type Roster } from "./kiosk-store.ts";
+import { SyncRetry } from "./sync-retry.ts";
 import { Alert, Brand } from "./ui.tsx";
 import {
   useAppUpdate,
@@ -36,10 +37,13 @@ export default function Kiosk() {
   const [online, setOnline] = useState(navigator.onLine);
   const [now, setNow] = useState(new Date());
   const [pending, setPending] = useState(0);
+  const pendingCount = useRef(0);
+  pendingCount.current = pending;
   const [error, setError] = useState("");
   const [message, setMessage] = useState<KioskNotice | null>(null);
   const [busy, setBusy] = useState(false);
   const flushing = useRef(false);
+  const retry = useRef(new SyncRetry());
   const update = useAppUpdate();
   const lastActivity = useRef(Date.now());
   const writing = useRef(false);
@@ -85,62 +89,101 @@ export default function Kiosk() {
     setOnline(true);
   }, [token]);
   const flush = useCallback(async () => {
-    if (!token || flushing.current || !navigator.onLine) return;
+    if (
+      !token ||
+      flushing.current ||
+      !navigator.onLine ||
+      !retry.current.ready()
+    )
+      return;
     flushing.current = true;
-    try {
-      const queue = await kioskStore.queue();
-      for (const item of queue) {
-        try {
-          const result = await api<{ status: string; review_reason: string }>(
-            "/kiosk/events",
-            {
-              method: "POST",
-              headers: { Authorization: "Bearer " + token },
-              body: JSON.stringify(item),
-            },
-          );
-          await kioskStore.remove(item.id);
-          setPending((await kioskStore.queue()).length);
-          setMessage({
-            kind: result.status === "accepted" ? "success" : "review",
-            text:
-              result.status === "accepted"
-                ? `${item.action === "in" ? "출근" : "퇴근"} 완료`
-                : `관리자 확인 대기 · ${result.review_reason}`,
-          });
-        } catch (err) {
-          if (err instanceof ApiError) {
-            setError(err.message);
-            if (err.status === 401) setRevoked(true);
-            break;
+    const synchronize = async () => {
+      try {
+        const queue = await kioskStore.queue();
+        setPending(queue.length);
+        for (const item of queue) {
+          try {
+            const result = await api<{ status: string; review_reason: string }>(
+              "/kiosk/events",
+              {
+                method: "POST",
+                headers: { Authorization: "Bearer " + token },
+                body: JSON.stringify(item),
+              },
+            );
+            if (
+              !["accepted", "pending", "rejected"].includes(result.status) ||
+              typeof result.review_reason !== "string"
+            )
+              throw new Error("출퇴근 응답을 확인하지 못했습니다.");
+            await kioskStore.remove(item.id);
+            setPending((await kioskStore.queue()).length);
+            setMessage({
+              kind: result.status === "accepted" ? "success" : "review",
+              text:
+                result.status === "accepted"
+                  ? `${item.action === "in" ? "출근" : "퇴근"} 완료`
+                  : `관리자 확인 대기 · ${result.review_reason}`,
+            });
+          } catch (err) {
+            retry.current.fail(err);
+            if (err instanceof ApiError) {
+              setError(err.message);
+              if (err.status === 401) setRevoked(true);
+              return;
+            }
+            await kioskStore.markOffline(item.id);
+            setOnline(false);
+            return;
           }
-          await kioskStore.markOffline(item.id);
-          setOnline(false);
-          break;
+        }
+        await refreshRoster();
+        setError("");
+        retry.current.success();
+      } catch (err) {
+        retry.current.fail(err);
+        setOnline(false);
+        if (err instanceof ApiError) {
+          setError(err.message);
+          if (err.status === 401) setRevoked(true);
         }
       }
-      await refreshRoster();
-    } catch (err) {
-      setOnline(false);
-      if (err instanceof ApiError) {
-        setError(err.message);
-        if (err.status === 401) setRevoked(true);
-      }
+    };
+    try {
+      // Two tabs share IndexedDB. Only one tab may drain its ordered queue.
+      if (navigator.locks)
+        await navigator.locks.request(
+          "feeledu-clock-sync",
+          { ifAvailable: true },
+          async (lock) => {
+            if (lock) await synchronize();
+          },
+        );
+      else await synchronize();
     } finally {
       flushing.current = false;
     }
   }, [token, refreshRoster]);
   useEffect(() => {
     void flush();
-    const timer = setInterval(() => void flush(), 15000);
+    let polls = 0;
+    const timer = setInterval(() => {
+      if (!document.hidden && (++polls % 4 === 0 || pendingCount.current > 0))
+        void flush();
+    }, 15000);
     const connected = () => void flush();
+    const resumed = () => {
+      if (!document.hidden) void flush();
+    };
     const disconnected = () => setOnline(false);
     window.addEventListener("online", connected);
     window.addEventListener("offline", disconnected);
+    document.addEventListener("visibilitychange", resumed);
     return () => {
       clearInterval(timer);
       window.removeEventListener("online", connected);
       window.removeEventListener("offline", disconnected);
+      document.removeEventListener("visibilitychange", resumed);
     };
   }, [flush]);
   useEffect(() => {
@@ -211,6 +254,7 @@ export default function Kiosk() {
       await kioskStore.set("token", data.token);
       await kioskStore.set("deviceName", data.name);
       setToken(data.token);
+      retry.current = new SyncRetry();
       setCode("");
       setRevoked(false);
       void navigator.storage?.persist?.();

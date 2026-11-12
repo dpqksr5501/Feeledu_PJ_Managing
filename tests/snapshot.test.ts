@@ -13,6 +13,7 @@ import {
   importSnapshotIntoEmptyDatabase,
 } from "../server/snapshot.ts";
 import { createHash } from "node:crypto";
+import { inspectSnapshot } from "../shared/snapshot-format.ts";
 
 test("cloud and Node verify each other's passwords, including existing UTF-8 passwords", () => {
   const password = "학원 관리자 암호-1234";
@@ -20,7 +21,7 @@ test("cloud and Node verify each other's passwords, including existing UTF-8 pas
   expect(nativeMatches(password, cloudHash(password))).toBe(true);
   expect(cloudMatches("different", nativeHash(password))).toBe(false);
 });
-test("portable snapshots preserve employees and settings, reject corruption and never overwrite an operating DB", () => {
+test("portable snapshots preserve employees and settings, reject corruption and never overwrite an operating DB", async () => {
   const source = openDb(":memory:"),
     destination = openDb(":memory:");
   try {
@@ -41,8 +42,12 @@ test("portable snapshots preserve employees and settings, reject corruption and 
       )
       .run("employee", "원본 조교", "0012", "2026-01-01");
     const snapshot = exportSnapshot(source);
+    await expect(
+      inspectSnapshot(JSON.parse(JSON.stringify(snapshot))),
+    ).resolves.toMatchObject({ employees: 1, shifts: 0, events: 0 });
     const corrupt = structuredClone(snapshot);
     corrupt.tables.employees[0].name = "수정된 백업";
+    await expect(inspectSnapshot(corrupt)).rejects.toThrow(/검사값/);
     expect(() => importSnapshotIntoEmptyDatabase(destination, corrupt)).toThrow(
       /검사값/,
     );

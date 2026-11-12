@@ -1,38 +1,10 @@
-import { z } from "zod";
+import {
+  snapshotSchema as schema,
+  snapshotTables,
+} from "../shared/snapshot-format.ts";
+export { snapshotTables } from "../shared/snapshot-format.ts";
 import { createHash } from "node:crypto";
 import { transaction, type Db } from "./database.ts";
-export const snapshotTables = [
-  "admins",
-  "employees",
-  "rates",
-  "day_rates",
-  "devices",
-  "shifts",
-  "clock_events",
-  "settings",
-  "holidays",
-  "adjustments",
-  "settlements",
-  "audit",
-] as const;
-const row = z.record(
-  z.string(),
-  z.union([z.string(), z.number().finite(), z.null()]),
-);
-const schema = z
-  .object({
-    format: z.literal("feeledu-snapshot"),
-    version: z.literal(1),
-    schema: z.literal(3),
-    created_at: z.iso.datetime(),
-    tables: z.object(
-      Object.fromEntries(
-        snapshotTables.map((table) => [table, z.array(row).max(100000)]),
-      ) as Record<(typeof snapshotTables)[number], z.ZodArray<typeof row>>,
-    ),
-    checksum: z.string().regex(/^[a-f0-9]{64}$/),
-  })
-  .strict();
 const checksum = (tables: unknown) =>
   createHash("sha256").update(JSON.stringify(tables)).digest("hex");
 export function exportSnapshot(db: Db) {

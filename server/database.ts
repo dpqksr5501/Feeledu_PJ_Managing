@@ -115,6 +115,18 @@ export function initializeDb(db: Db) {
       reason TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(employee_id,date));`);
     db.prepare("INSERT OR IGNORE INTO schema_version VALUES(3)").run();
   });
+  // Additive indexes keep the portable schema-3 backup format compatible.
+  // Only pending events enter this index; accepted history costs no index writes.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS shifts_end ON shifts(ended_at,started_at);
+    CREATE INDEX IF NOT EXISTS shifts_employee_end ON shifts(employee_id,ended_at,started_at) WHERE voided=0;
+    CREATE INDEX IF NOT EXISTS clock_pending ON clock_events(captured_at,received_at,employee_id) WHERE status='pending';
+    CREATE INDEX IF NOT EXISTS audit_recent ON audit(created_at DESC);
+    CREATE INDEX IF NOT EXISTS audit_action_recent ON audit(action,created_at DESC);
+    CREATE INDEX IF NOT EXISTS adjustments_date ON adjustments(date);
+    CREATE INDEX IF NOT EXISTS day_rates_date ON day_rates(date);
+    CREATE INDEX IF NOT EXISTS rates_effective ON rates(effective_from);
+  `);
   return db;
 }
 

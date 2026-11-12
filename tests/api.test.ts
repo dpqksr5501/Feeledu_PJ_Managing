@@ -173,6 +173,135 @@ describe("API integrity and permissions", () => {
       (await f.request("/admin/employees", undefined, "GET", "", token)).status,
     ).toBe(401);
   });
+  test("concurrent retries and new IDs cannot duplicate an open shift; heartbeat writes are throttled", async () => {
+    const employee_id = await f.employee();
+    const token = await f.device();
+    const event = {
+      id: randomUUID(),
+      employee_id,
+      action: "in",
+      captured_at: new Date().toISOString(),
+      offline: false,
+    };
+    const results = await Promise.all(
+      Array.from({ length: 24 }, () =>
+        f.request("/kiosk/events", event, "POST", "", token),
+      ),
+    );
+    expect(
+      results.every(
+        (result) => result.status === 200 && result.data.status === "accepted",
+      ),
+    ).toBe(true);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM shifts").get()!.n).toBe(1);
+    expect(
+      f.db.prepare("SELECT COUNT(*) AS n FROM clock_events").get()!.n,
+    ).toBe(1);
+    // An acknowledged-lost request is retried with offline=true and the same ID.
+    expect(
+      (
+        await f.request(
+          "/kiosk/events",
+          { ...event, offline: true },
+          "POST",
+          "",
+          token,
+        )
+      ).data.status,
+    ).toBe("accepted");
+    const otherToken = await f.device();
+    expect(
+      (await f.request("/kiosk/events", event, "POST", "", otherToken)).status,
+    ).toBe(409);
+    const distinct = await Promise.all(
+      Array.from({ length: 12 }, () =>
+        f.request(
+          "/kiosk/events",
+          { ...event, id: randomUUID() },
+          "POST",
+          "",
+          token,
+        ),
+      ),
+    );
+    expect(distinct.every((result) => result.data.status === "pending")).toBe(
+      true,
+    );
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM shifts").get()!.n).toBe(1);
+    expect(
+      f.db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM clock_events WHERE status='pending'",
+        )
+        .get()!.n,
+    ).toBe(12);
+    const device = f.db
+      .prepare(
+        "SELECT id,last_seen FROM devices WHERE last_seen IS NOT NULL ORDER BY created_at LIMIT 1",
+      )
+      .get()!;
+    await Promise.all(
+      Array.from({ length: 8 }, () =>
+        f.request("/kiosk/roster", undefined, "GET", "", token),
+      ),
+    );
+    expect(
+      f.db
+        .prepare("SELECT last_seen FROM devices WHERE id=?")
+        .get(String(device.id))!.last_seen,
+    ).toBe(device.last_seen);
+    f.db
+      .prepare("UPDATE devices SET last_seen=? WHERE id=?")
+      .run("2020-01-01T00:00:00.000Z", String(device.id));
+    await f.request("/kiosk/roster", undefined, "GET", "", token);
+    expect(
+      f.db
+        .prepare("SELECT last_seen FROM devices WHERE id=?")
+        .get(String(device.id))!.last_seen,
+    ).not.toBe("2020-01-01T00:00:00.000Z");
+  });
+  test("backup status is owner-only and reports generation without exposing backup data", async () => {
+    expect(
+      (await f.request("/admin/backup/status", undefined, "GET", "")).status,
+    ).toBe(401);
+    expect((await f.request("/admin/backup/status")).data).toEqual({
+      createdAt: null,
+    });
+    f.db
+      .prepare("INSERT INTO audit VALUES(?,?,?,?,?,?)")
+      .run(
+        randomUUID(),
+        "owner",
+        "backup.download",
+        "database",
+        "{}",
+        "2026-11-11T10:00:00.000Z",
+      );
+    expect((await f.request("/admin/backup/status")).data).toEqual({
+      createdAt: "2026-11-11T10:00:00.000Z",
+    });
+    await f.request("/admin/accounts", {
+      username: "backup-manager",
+      name: "부장",
+      password: "test-password!123",
+      role: "manager",
+    });
+    const login = await f.request(
+      "/login",
+      {
+        username: "backup-manager",
+        password: "test-password!123",
+        shared_tablet: false,
+      },
+      "POST",
+      "",
+    );
+    const cookie = login.response.headers.get("set-cookie")!.split(";")[0];
+    expect(
+      (await f.request("/admin/backup/status", undefined, "GET", cookie))
+        .status,
+    ).toBe(403);
+  });
   test("approves offline in/out in order using captured time, without counting it before approval", async () => {
     const employee_id = await f.employee();
     const token = await f.device();

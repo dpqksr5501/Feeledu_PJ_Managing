@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, basename, resolve } from "node:path";
 import { openDb } from "../server/db.ts";
+import { overlappingShift, shiftRangeSql } from "../server/shift-query.ts";
 
 function workspace() {
   const folder = mkdtempSync(join(tmpdir(), "feeledu-migration-"));
@@ -18,6 +19,69 @@ function workspace() {
     },
   };
 }
+test("indexed range preserves cross-midnight, long open, voided and exact boundary semantics", () => {
+  const db = openDb(":memory:");
+  try {
+    db.prepare(
+      "INSERT INTO employees(id,name,phone_last4,created_at) VALUES('e','조교','0012','2026-01-01')",
+    ).run();
+    const insert = db.prepare(
+      "INSERT INTO shifts(id,employee_id,started_at,ended_at,voided,source,created_at) VALUES(?,'e',?,?,?,'manual','2026-01-01')",
+    );
+    insert.run("long-open", "2025-01-01T00:00:00.000Z", null, 0);
+    insert.run(
+      "crossing",
+      "2026-11-10T23:00:00.000Z",
+      "2026-11-11T03:00:00.000Z",
+      0,
+    );
+    insert.run(
+      "before",
+      "2026-11-10T22:00:00.000Z",
+      "2026-11-11T00:00:00.000Z",
+      0,
+    );
+    insert.run(
+      "after",
+      "2026-11-12T00:00:00.000Z",
+      "2026-11-12T02:00:00.000Z",
+      0,
+    );
+    insert.run(
+      "voided",
+      "2026-11-11T01:00:00.000Z",
+      "2026-11-11T02:00:00.000Z",
+      1,
+    );
+    const begin = "2026-11-11T00:00:00.000Z",
+      end = "2026-11-12T00:00:00.000Z";
+    expect(
+      db
+        .prepare(shiftRangeSql())
+        .all(end, begin, end)
+        .map((s) => s.id),
+    ).toEqual(["long-open", "crossing"]);
+    expect(
+      db
+        .prepare(shiftRangeSql(true))
+        .all(end, begin, end)
+        .map((s) => s.id),
+    ).toEqual(["voided", "crossing", "long-open"]);
+    expect(overlappingShift(db, "e", begin, end)?.id).toBe("long-open");
+    expect(overlappingShift(db, "e", begin, end, "long-open")?.id).toBe(
+      "crossing",
+    );
+    expect(
+      overlappingShift(db, "e", "2026-11-11T03:00:00.000Z", end, "long-open"),
+    ).toBeUndefined();
+    expect(
+      overlappingShift(db, "e", "2026-11-11T03:00:00.000Z", null, "long-open")
+        ?.id,
+    ).toBe("after");
+  } finally {
+    db.close();
+  }
+});
 test("migrates a version-1 employee without dropping data and can safely reopen the result", () => {
   const temporary = workspace();
   try {

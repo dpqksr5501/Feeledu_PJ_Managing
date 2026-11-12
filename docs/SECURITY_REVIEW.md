@@ -20,6 +20,10 @@ Phone last four digits identify a person; they do not prove the person entered t
 
 Dependencies: `npm audit` includes production and development packages. Run it again with future upgrades; a clean result only addresses published dependency advisories.
 
+## Reliability follow-up (2026-11-12)
+
+2026-11-12 reliability follow-up: queued clock events now require a valid JSON acknowledgement before removal. Retry backoff respects `Retry-After` and stops for revoked tokens; Web Locks serialize shared queues across supported browser tabs. Saturated Cloudflare request limits no longer keep incrementing persistent counters. Owner/password backup controls remain in place, and JSON integrity checking runs locally without uploading the file. Additive indexes and bounded period queries preserve schema-3 backup compatibility. See [operations and measured query costs](OPERATIONS.md) for backup, restore and free-tier limits. These checks are not a guarantee against all defects or attacks.
+
 ## References
 
 - https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html

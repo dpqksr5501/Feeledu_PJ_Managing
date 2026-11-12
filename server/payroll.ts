@@ -18,6 +18,7 @@ import {
 import { getPolicy, type Db } from "./database.ts";
 import { holidayName } from "../shared/workdays.ts";
 import { paidMillisecondsInRange } from "../shared/shift-duration.ts";
+import { shiftRangeSql } from "./shift-query.ts";
 
 export function calculatePayroll(db: Db, from: string, to: string): Payroll {
   const policy = getPolicy(db);
@@ -27,16 +28,19 @@ export function calculatePayroll(db: Db, from: string, to: string): Payroll {
     .prepare("SELECT * FROM employees ORDER BY name")
     .all() as unknown as Employee[];
   const shifts = db
-    .prepare(
-      "SELECT * FROM shifts WHERE voided=0 AND started_at < ? AND (ended_at IS NULL OR ended_at > ?) ORDER BY started_at",
-    )
+    .prepare(shiftRangeSql())
     .all(
       new Date(end).toISOString(),
       new Date(dayStart(firstWeek)).toISOString(),
+      new Date(end).toISOString(),
     ) as unknown as Shift[];
   const rates = db
-    .prepare("SELECT * FROM rates ORDER BY effective_from")
-    .all() as unknown as Rate[];
+    .prepare(
+      `SELECT r.* FROM employees e JOIN rates r ON r.employee_id=e.id
+      AND r.effective_from=(SELECT MAX(effective_from) FROM rates WHERE employee_id=e.id AND effective_from<=?)
+      UNION ALL SELECT * FROM rates WHERE effective_from>? AND effective_from<=? ORDER BY effective_from`,
+    )
+    .all(firstWeek, firstWeek, to) as unknown as Rate[];
   const holidayRows = db
     .prepare("SELECT * FROM holidays")
     .all() as unknown as Holiday[];
@@ -44,7 +48,9 @@ export function calculatePayroll(db: Db, from: string, to: string): Payroll {
   const adjustments = db
     .prepare("SELECT * FROM adjustments WHERE date BETWEEN ? AND ? ORDER BY id")
     .all(from, to) as unknown as Adjustment[];
-  const dayRates = db.prepare("SELECT * FROM day_rates ORDER BY date").all();
+  const dayRates = db
+    .prepare("SELECT * FROM day_rates WHERE date BETWEEN ? AND ? ORDER BY date")
+    .all(firstWeek, to);
   const warnings: string[] = [];
   if (!policy.confirmed)
     warnings.push(

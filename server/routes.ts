@@ -11,6 +11,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import { audit, getPolicy, transaction, type Db } from "./database.ts";
 import { calculatePayroll } from "./payroll.ts";
 import { attendanceWeek } from "./attendance.ts";
+import { overlappingShift, shiftRangeSql } from "./shift-query.ts";
 import { addDays, dayStart, seoulDate } from "../shared/time.ts";
 import type { Admin, ClockEvent, Device, Shift } from "../shared/types.ts";
 import {
@@ -223,10 +224,14 @@ export function registerRoutes(
         ),
       );
     req.device = device;
-    db.prepare("UPDATE devices SET last_seen=? WHERE id=?").run(
-      new Date().toISOString(),
-      device.id,
-    );
+    if (
+      !device.last_seen ||
+      Date.now() - Date.parse(device.last_seen) >= 5 * 60000
+    )
+      db.prepare("UPDATE devices SET last_seen=? WHERE id=?").run(
+        new Date().toISOString(),
+        device.id,
+      );
     next();
   };
   function login(res: Response, adminId: string, sharedTablet = false) {
@@ -584,12 +589,11 @@ export function registerRoutes(
     const { from, to } = period.parse(req.query);
     res.json(
       db
-        .prepare(
-          "SELECT s.*,e.name FROM shifts s JOIN employees e ON e.id=s.employee_id WHERE s.started_at < ? AND (s.ended_at IS NULL OR s.ended_at > ?) ORDER BY s.started_at DESC",
-        )
+        .prepare(shiftRangeSql(true))
         .all(
           new Date(dayStart(addDays(to, 1))).toISOString(),
           new Date(dayStart(from)).toISOString(),
+          new Date(dayStart(addDays(to, 1))).toISOString(),
         ),
     );
   });
@@ -605,13 +609,12 @@ export function registerRoutes(
       fail(400, "미래 시각의 근무기록은 등록할 수 없습니다.");
     if (body.break_minutes * 60000 >= end - start)
       fail(400, "휴게시간이 전체 근무시간보다 짧아야 합니다.");
-    const overlap = one(
+    const overlap = overlappingShift(
       db,
-      "SELECT id FROM shifts WHERE employee_id=? AND id<>? AND voided=0 AND started_at < ? AND (ended_at IS NULL OR ended_at > ?)",
       body.employee_id,
-      except,
-      body.ended_at ?? "9999-12-31T00:00:00.000Z",
       body.started_at,
+      body.ended_at,
+      except,
     );
     if (overlap) fail(409, "같은 직원의 다른 근무 구간과 겹칩니다.");
   }
@@ -1127,6 +1130,13 @@ export function registerRoutes(
       audit(db, req.admin!.id, "device.revoke", id, {});
     });
     res.json({ ok: true });
+  });
+  admin.get("/backup/status", owner, (_req, res) => {
+    const last = one<{ created_at: string }>(
+      db,
+      "SELECT created_at FROM audit WHERE action='backup.download' ORDER BY created_at DESC LIMIT 1",
+    );
+    res.json({ createdAt: last?.created_at ?? null });
   });
   admin.get("/backup", owner, () =>
     fail(403, "현재 비밀번호를 확인한 후 백업을 받을 수 있습니다."),
