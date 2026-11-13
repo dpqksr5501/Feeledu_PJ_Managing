@@ -46,7 +46,8 @@ export type AdminData = {
 type ContextValue = {
   admin: Admin;
   data: AdminData;
-  refresh: () => void;
+  revision: number;
+  refresh: (resources?: AdminResource[]) => void;
   mutate: (path: string, body?: unknown, method?: string) => Promise<boolean>;
   open: (title: string, content: ReactNode) => void;
   close: () => void;
@@ -55,6 +56,7 @@ type ContextValue = {
   setPeriod: (from: string, to: string) => void;
   navigate: (tab: string) => void;
 };
+export type AdminResource = keyof AdminData;
 export const AdminContext = createContext<ContextValue | null>(null);
 export function useAdmin() {
   return useContext(AdminContext)!;

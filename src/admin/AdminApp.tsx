@@ -27,7 +27,8 @@ import {
 } from "../../shared/time.ts";
 import { api, ApiError, download } from "../api.ts";
 import { Alert, Brand, Empty, Help, Loading, Modal } from "../ui.tsx";
-import { AdminContext, type AdminData } from "./context.tsx";
+import { AdminContext, type AdminResource } from "./context.tsx";
+import { resourcesAfterMutation, useAdminData } from "./useAdminData.ts";
 import {
   AdjustmentForm,
   EmployeeForm,
@@ -39,6 +40,7 @@ import {
 } from "./forms.tsx";
 import SettingsPage, { BackupForm } from "./SettingsPage.tsx";
 import WeeklyAttendance from "./WeeklyAttendance.tsx";
+import { UpdateHistoryButton } from "../UpdateCenter.tsx";
 import { holidayName, workedDates } from "../../shared/workdays.ts";
 
 const navigation = [
@@ -93,9 +95,7 @@ export default function AdminApp({
   const [from, setFrom] = useState(today.slice(0, 8) + "01");
   const [to, setTo] = useState(today);
   const [tab, setTab] = useState("overview");
-  const [data, setData] = useState<AdminData | null>(null);
   const [revision, setRevision] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(
     null,
   );
@@ -106,115 +106,37 @@ export default function AdminApp({
   const [search, setSearch] = useState("");
   const [recordFilter, setRecordFilter] = useState("all");
   const [recordEmployeeId, setRecordEmployeeId] = useState("");
-  const refresh = useCallback(() => setRevision((v) => v + 1), []);
+  const {
+    data,
+    loading,
+    fetching,
+    loadError,
+    refresh: refreshResources,
+  } = useAdminData({
+    admin,
+    tab,
+    from,
+    to,
+    expired,
+    failed: (text) => setNotice({ text, error: true }),
+  });
+  const refresh = useCallback(
+    (resources?: AdminResource[]) => {
+      refreshResources(resources);
+      setRevision((value) => value + 1);
+    },
+    [refreshResources],
+  );
   const close = useCallback(() => setModal(null), []);
   const open = (title: string, content: ReactNode) =>
     setModal({ title, content });
   useEffect(() => {
-    let current = true;
-    setLoading(true);
-    const range = new URLSearchParams({ from, to }).toString();
-    void Promise.all([
-      api<AdminData["employees"]>("/admin/employees"),
-      api<AdminData["records"]>("/admin/records?" + range),
-      api<AdminData["reviews"]>("/admin/reviews"),
-      api<AdminData["payroll"]>("/admin/payroll?" + range),
-      api<AdminData["policy"]>("/admin/settings"),
-      api<AdminData["holidays"]>("/admin/holidays"),
-      api<AdminData["adjustments"]>("/admin/adjustments?" + range),
-      admin.role === "owner"
-        ? api<Admin[]>("/admin/accounts")
-        : Promise.resolve([]),
-      admin.role === "owner"
-        ? api<AdminData["devices"]>("/admin/devices")
-        : Promise.resolve([]),
-      api<AdminData["audit"]>("/admin/audit"),
-      api<AdminData["settlements"]>("/admin/settlements"),
-    ])
-      .then(
-        ([
-          employees,
-          records,
-          reviews,
-          payroll,
-          policy,
-          holidays,
-          adjustments,
-          accounts,
-          devices,
-          audit,
-          settlements,
-        ]) => {
-          if (current)
-            setData({
-              employees,
-              records,
-              reviews,
-              payroll,
-              policy,
-              holidays,
-              adjustments,
-              accounts,
-              devices,
-              audit,
-              settlements,
-            });
-        },
-      )
-      .catch((err) => {
-        if (!current) return;
-        if (err instanceof ApiError && err.status === 401) expired();
-        else setNotice({ text: (err as Error).message, error: true });
-      })
-      .finally(() => {
-        if (current) setLoading(false);
-      });
-    return () => {
-      current = false;
-    };
-  }, [from, to, revision, admin.role, today]);
-  useEffect(() => {
     if (modal || tab !== "records") return;
-    const controller = new AbortController();
-    let fetching = false;
-    const load = async () => {
-      if (fetching || document.hidden) return;
-      fetching = true;
-      try {
-        const range = new URLSearchParams({ from, to });
-        const [records, reviews] = await Promise.all([
-          api<AdminData["records"]>("/admin/records?" + range, {
-            signal: controller.signal,
-          }),
-          api<AdminData["reviews"]>("/admin/reviews", {
-            signal: controller.signal,
-          }),
-        ]);
-        if (!controller.signal.aborted)
-          setData((previous) => previous && { ...previous, records, reviews });
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        if (err instanceof ApiError && err.status === 401) expired();
-        else
-          setNotice({
-            text: "자동 조회 실패 · 마지막 기록을 표시합니다.",
-            error: true,
-          });
-      } finally {
-        fetching = false;
-      }
-    };
-    const timer = setInterval(() => void load(), 60000);
-    const resumed = () => void load();
-    document.addEventListener("visibilitychange", resumed);
-    window.addEventListener("online", resumed);
-    return () => {
-      controller.abort();
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", resumed);
-      window.removeEventListener("online", resumed);
-    };
-  }, [modal, tab, from, to, revision]);
+    const timer = setInterval(() => {
+      if (!document.hidden && navigator.onLine) refresh(["records", "reviews"]);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [refresh, modal, tab]);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(
@@ -229,7 +151,7 @@ export default function AdminApp({
         method,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
-      refresh();
+      refresh(resourcesAfterMutation(path));
       setNotice({ text: "저장 완료", error: false });
       return true;
     } catch (err) {
@@ -294,6 +216,7 @@ export default function AdminApp({
   const ctx = data && {
     admin,
     data,
+    revision,
     refresh,
     mutate,
     open,
@@ -686,6 +609,7 @@ export default function AdminApp({
                 weekday: "short",
               }).format(new Date())}
             </span>
+            <UpdateHistoryButton />
           </div>
         </header>
         <main className="content">
@@ -704,15 +628,21 @@ export default function AdminApp({
               )}
               <button
                 className="button secondary"
-                onClick={refresh}
-                disabled={loading}
+                onClick={() => refresh()}
+                disabled={fetching}
               >
-                <RefreshCw size={16} className={loading ? "spin" : ""} />{" "}
+                <RefreshCw
+                  size={16}
+                  className={loading || fetching ? "spin" : ""}
+                />{" "}
                 새로고침
               </button>
             </div>
           </div>
-          {data && ctx ? (
+          {(tab === "records" || tab === "payroll") && (
+            <div className="toolbar">{periodControl}</div>
+          )}
+          {data && ctx && !loading ? (
             <AdminContext.Provider value={ctx}>
               {!data.policy.confirmed && tab !== "settings" && (
                 <Alert>
@@ -732,6 +662,11 @@ export default function AdminApp({
                     expired={expired}
                     onAdd={() => open("조교 등록", <EmployeeForm />)}
                     onRecords={(a, b, id) => {
+                      if (
+                        id &&
+                        !data.employees.some((employee) => employee.id === id)
+                      )
+                        refresh(["employees"]);
                       setPeriod(a, b);
                       navigate("records");
                       setRecordEmployeeId(id || "");
@@ -800,7 +735,6 @@ export default function AdminApp({
                     </section>
                   )}
                   <div className="toolbar">
-                    {periodControl}
                     <div className="row">
                       <select
                         aria-label="근무 직원 필터"
@@ -994,7 +928,6 @@ export default function AdminApp({
               {tab === "payroll" && (
                 <>
                   <div className="toolbar">
-                    {periodControl}
                     <div className="row">
                       <button
                         className="button secondary"
@@ -1294,7 +1227,7 @@ export default function AdminApp({
                 </Modal>
               )}
             </AdminContext.Provider>
-          ) : loading ? (
+          ) : loading && !loadError ? (
             <Loading />
           ) : (
             <div className="panel">

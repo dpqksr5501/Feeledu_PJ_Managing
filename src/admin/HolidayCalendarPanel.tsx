@@ -18,7 +18,7 @@ export default function HolidayCalendarPanel({
   year: number;
   setYear: (year: number) => void;
 }) {
-  const { data, refresh, open } = useAdmin();
+  const { data, revision, refresh, open } = useAdmin();
   const [status, setStatus] = useState<HolidayCalendarStatus | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -27,12 +27,14 @@ export default function HolidayCalendarPanel({
   useEffect(() => {
     let active = true,
       fetching = false;
+    const controller = new AbortController();
     const load = async () => {
-      if (fetching || document.hidden) return;
+      if (fetching || document.hidden || !navigator.onLine) return;
       fetching = true;
       try {
         const next = await api<HolidayCalendarStatus>(
           "/admin/holiday-calendar",
+          { signal: controller.signal },
         );
         if (active) {
           const version = JSON.stringify(
@@ -49,12 +51,12 @@ export default function HolidayCalendarPanel({
             data.holidays.filter(
               (day) => day.source === "official" || day.source === "both",
             ).length;
-          if (
-            (lastVersion.current && lastVersion.current !== version) ||
-            missingRows
-          )
-            refresh();
+          const changed = lastVersion.current !== version;
+          const refreshRows = changed && (!!lastVersion.current || missingRows);
+          // Record the version before refreshing: stale rows can remain visible
+          // while the replacement request is pending, and must not trigger a loop.
           lastVersion.current = version;
+          if (refreshRows) refresh(["holidays", "payroll", "audit"]);
           setStatus(next);
           setError("");
         }
@@ -65,17 +67,18 @@ export default function HolidayCalendarPanel({
       }
     };
     void load();
-    const timer = setInterval(() => void load(), 30000);
+    const timer = setInterval(() => void load(), 5 * 60000);
     const resumed = () => void load();
     document.addEventListener("visibilitychange", resumed);
     window.addEventListener("online", resumed);
     return () => {
       active = false;
+      controller.abort();
       clearInterval(timer);
       document.removeEventListener("visibilitychange", resumed);
       window.removeEventListener("online", resumed);
     };
-  }, [data.holidays, data.audit]);
+  }, [revision]);
   const entry = status?.years.find((entry) => entry.year === year);
   const stale =
     entry?.synced_at &&
@@ -122,7 +125,7 @@ export default function HolidayCalendarPanel({
             } finally {
               writing.current = false;
               setBusy(false);
-              refresh();
+              refresh(["holidays", "payroll", "audit"]);
             }
           }}
         >

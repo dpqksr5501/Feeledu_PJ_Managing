@@ -329,14 +329,17 @@ export default function SettingsPage() {
   );
 }
 function BackupPanel() {
-  const { data, open } = useAdmin();
+  const { revision, open } = useAdmin();
   const [status, setStatus] = useState<string | null | undefined>(undefined);
   const [error, setError] = useState("");
   const [result, setResult] = useState("");
   const [checking, setChecking] = useState(false);
   useEffect(() => {
     let current = true;
-    api<{ createdAt: string | null }>("/admin/backup/status")
+    const controller = new AbortController();
+    api<{ createdAt: string | null }>("/admin/backup/status", {
+      signal: controller.signal,
+    })
       .then((value) => {
         if (current) {
           setStatus(value.createdAt);
@@ -348,8 +351,9 @@ function BackupPanel() {
       });
     return () => {
       current = false;
+      controller.abort();
     };
-  }, [data.audit]);
+  }, [revision]);
   return (
     <section className="panel form-stack">
       <div className="panel-heading">
@@ -462,7 +466,7 @@ export function BackupForm() {
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       form.reset();
-      refresh();
+      refresh(["audit"]);
       close();
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) refresh();

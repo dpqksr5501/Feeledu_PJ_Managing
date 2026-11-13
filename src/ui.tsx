@@ -12,10 +12,12 @@ export function Modal({
   title,
   children,
   close,
+  dismissible = true,
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
+  dismissible?: boolean;
 }) {
   const dialog = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -28,11 +30,15 @@ export function Modal({
           'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
         ) || [],
       );
-    focusable()[0]?.focus();
+    (focusable()[0] ?? dialog.current)?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+      if (event.key === "Escape" && dismissible) close();
       if (event.key === "Tab") {
         const elements = focusable();
+        if (!elements.length) {
+          event.preventDefault();
+          return;
+        }
         const first = elements[0],
           last = elements.at(-1);
         if (event.shiftKey && document.activeElement === first) {
@@ -50,12 +56,12 @@ export function Modal({
       document.body.style.overflow = previousOverflow;
       previousFocus?.focus();
     };
-  }, [close]);
+  }, [close, dismissible]);
   return (
     <div
       className="modal-backdrop"
       onClick={(event) => {
-        if (event.target === event.currentTarget) close();
+        if (dismissible && event.target === event.currentTarget) close();
       }}
     >
       <section
@@ -64,12 +70,15 @@ export function Modal({
         aria-modal="true"
         aria-label={title}
         className="modal"
+        tabIndex={-1}
       >
         <header>
           <h2>{title}</h2>
-          <button className="icon-button" aria-label="닫기" onClick={close}>
-            <X size={20} />
-          </button>
+          {dismissible && (
+            <button className="icon-button" aria-label="닫기" onClick={close}>
+              <X size={20} />
+            </button>
+          )}
         </header>
         {children}
       </section>

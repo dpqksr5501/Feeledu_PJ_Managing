@@ -11,6 +11,8 @@
   Cache-Control: no-cache
 /android-release.json
   Cache-Control: no-cache
+/app-release.json
+  Cache-Control: no-cache, no-store
 /.well-known/assetlinks.json
   Content-Type: application/json
   Cache-Control: public, max-age=300

@@ -13,6 +13,7 @@ test("an installed shell preserves its offline queue across a safe idle update",
   test.setTimeout(60000);
   const original = readFileSync("dist/sw.js", "utf8");
   try {
+    await page.clock.install();
     await page.goto("/download");
     await expect(
       page.getByRole("heading", { name: "필에듀 출퇴근", exact: true }),
@@ -60,7 +61,33 @@ test("an installed shell preserves its offline queue across a safe idle update",
       });
       db.close();
     });
-    writeFileSync("dist/sw.js", original + "\n// update-test-" + randomUUID());
+    const metadata = JSON.parse(readFileSync("dist/app-release.json", "utf8"));
+    const revision = randomUUID().replaceAll("-", "").slice(0, 16);
+    const notes = [2, 1].map((number) => ({
+      id: "qa-update-" + number,
+      date: "2026-11-13",
+      title: `테스트 업데이트 ${number}`,
+      changes: Array.from(
+        { length: 10 },
+        (_, index) =>
+          `변경 ${index + 1}: 여러 항목의 업데이트 내역을 안전하게 확인합니다.`,
+      ),
+    }));
+    const next = {
+      ...metadata,
+      revision,
+      releaseId: notes[0].id,
+      releases: [...notes, ...metadata.releases],
+    };
+    writeFileSync(
+      "dist/sw.js",
+      original
+        .replace(/const CACHE='[^']+';/, `const CACHE='feeledu-${revision}';`)
+        .replace(
+          /const RELEASE=.*;\n/,
+          "const RELEASE=" + JSON.stringify(next) + ";\n",
+        ),
+    );
     await page.evaluate(async () => {
       await (await navigator.serviceWorker.getRegistration())!.update();
     });
@@ -73,7 +100,6 @@ test("an installed shell preserves its offline queue across a safe idle update",
       )
       .toBe(true);
     // Advance the page's idle timer; a durable queued event must prevent activation/reload.
-    await page.clock.install();
     await page.clock.runFor(65000);
     expect(
       await page.evaluate(
@@ -81,6 +107,17 @@ test("an installed shell preserves its offline queue across a safe idle update",
           !!(await navigator.serviceWorker.getRegistration())?.waiting,
       ),
     ).toBe(true);
+    const editing = await page.context().newPage();
+    await editing.goto("/admin");
+    await editing.getByLabel("운영자 이름").fill("작성 중인 관리자 양식");
+    await editing.getByRole("button", { name: "적용", exact: true }).click();
+    await expect(
+      editing.getByText(/작성 중인 화면을 저장하거나 닫고/),
+    ).toBeVisible();
+    await expect(
+      editing.getByRole("dialog", { name: "업데이트가 있습니다", exact: true }),
+    ).not.toBeVisible();
+    await page.bringToFront();
     await page.evaluate(async () => {
       const db = await new Promise<IDBDatabase>((resolve) => {
         const request = indexedDB.open("feeledu-kiosk-v1", 1);
@@ -93,9 +130,64 @@ test("an installed shell preserves its offline queue across a safe idle update",
       });
       db.close();
     });
+    await page.clock.runFor(6000);
+    let notice = page.getByRole("dialog", {
+      name: "업데이트가 있습니다",
+      exact: true,
+    });
+    await expect(notice).toBeVisible();
+    await notice.getByRole("button", { name: "나중에", exact: true }).click();
+    await page.clock.runFor(65000);
+    await expect(notice).not.toBeVisible();
+    expect(
+      await page.evaluate(
+        async () =>
+          !!(await navigator.serviceWorker.getRegistration())?.waiting,
+      ),
+    ).toBe(true);
+    await page.getByRole("button", { name: "적용", exact: true }).click();
+    await expect(notice).toBeVisible();
     const reload = page.waitForEvent("load");
     await page.clock.runFor(6000);
     await reload;
+    notice = page.getByRole("dialog", {
+      name: "업데이트가 반영되었습니다",
+      exact: true,
+    });
+    await expect(notice).toBeVisible();
+    // Another tab's activation must not reload a dirty administrator form.
+    await expect(editing.getByLabel("운영자 이름")).toHaveValue(
+      "작성 중인 관리자 양식",
+    );
+    await editing.close();
+    await expect(
+      notice.getByRole("heading", { name: "테스트 업데이트 2" }),
+    ).toBeVisible();
+    await expect(
+      notice.getByRole("heading", { name: "테스트 업데이트 1" }),
+    ).toBeAttached();
+    await page.setViewportSize({ width: 375, height: 667 });
+    const scroller = notice.getByLabel("업데이트 변경 내역");
+    expect(
+      await scroller.evaluate(
+        (element) => element.scrollHeight > element.clientHeight,
+      ),
+    ).toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: ".tmp/qa-update-notice.png",
+      fullPage: true,
+    });
+    await scroller.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await notice.getByRole("button", { name: "확인", exact: true }).click();
+    await page.reload();
+    await expect(notice).not.toBeVisible();
     await expect(
       page.getByRole("heading", { name: "태블릿 연결", exact: true }),
     ).toBeVisible();

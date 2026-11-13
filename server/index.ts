@@ -55,7 +55,11 @@ if (production) {
     express.static(resolve("dist"), {
       index: false,
       setHeaders: (res, path) => {
-        if (path.endsWith("sw.js") || path.endsWith("index.html"))
+        if (
+          path.endsWith("sw.js") ||
+          path.endsWith("index.html") ||
+          path.endsWith("app-release.json")
+        )
           res.setHeader("Cache-Control", "no-cache");
       },
     }),

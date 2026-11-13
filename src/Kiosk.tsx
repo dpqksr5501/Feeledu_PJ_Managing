@@ -20,7 +20,9 @@ import {
   checkAppUpdate,
   applyAppUpdate,
   isApplyingUpdate,
+  registerUpdateGuard,
 } from "./app-update.ts";
+import { UpdateHistoryButton } from "./UpdateCenter.tsx";
 type KioskNotice = { kind: "success" | "review" | "local"; text: string };
 
 export default function Kiosk() {
@@ -58,6 +60,7 @@ export default function Kiosk() {
     loaded &&
     (await kioskStore.queue()).length === 0;
   const [revoked, setRevoked] = useState(false);
+  useEffect(() => registerUpdateGuard(() => safeToUpdate.current()), []);
   useEffect(() => {
     if (message?.kind !== "success" || pending > 0) return;
     const timer = setTimeout(() => setMessage(null), 5000);
@@ -205,7 +208,7 @@ export default function Kiosk() {
     if (!update.ready) return;
     const timer = setInterval(() => {
       if (!document.hidden && Date.now() - lastActivity.current >= 60000)
-        void applyAppUpdate(() => safeToUpdate.current());
+        void applyAppUpdate(() => safeToUpdate.current(), { automatic: true });
     }, 5000);
     return () => clearInterval(timer);
   }, [update.ready]);
@@ -233,6 +236,14 @@ export default function Kiosk() {
   }, []);
   useEffect(() => {
     const listener = (e: KeyboardEvent) => {
+      if (
+        e.defaultPrevented ||
+        document.querySelector('[aria-modal="true"]') ||
+        (e.target instanceof HTMLElement &&
+          (e.target.matches("input,textarea,select") ||
+            e.target.isContentEditable))
+      )
+        return;
       if (!token || busy || selected) return;
       if (/^\d$/.test(e.key)) input(e.key);
       if (e.key === "Backspace") input("delete");
@@ -336,6 +347,7 @@ export default function Kiosk() {
       <header className="kiosk-top">
         <Brand />
         <div className="row">
+          <UpdateHistoryButton />
           <a
             className="text-button"
             href="/download"

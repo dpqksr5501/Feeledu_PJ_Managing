@@ -76,13 +76,15 @@ export default function WeeklyAttendance({
   useEffect(() => {
     let active = true,
       fetching = false;
+    const controller = new AbortController();
     const load = async () => {
-      if (fetching) return;
+      if (fetching || !navigator.onLine) return;
       fetching = true;
       setBusy(true);
       try {
         const result = await api<Week>(
           "/admin/attendance-week" + (anchor ? "?date=" + anchor : ""),
+          { signal: controller.signal },
         );
         if (active) {
           setWeek(result);
@@ -97,7 +99,7 @@ export default function WeeklyAttendance({
         if (active) setBusy(false);
       }
     };
-    void load();
+    if (!document.hidden) void load();
     const timer = setInterval(() => {
       if (!document.hidden) void load();
     }, 60000);
@@ -108,6 +110,7 @@ export default function WeeklyAttendance({
     window.addEventListener("online", resumed);
     return () => {
       active = false;
+      controller.abort();
       clearInterval(timer);
       document.removeEventListener("visibilitychange", resumed);
       window.removeEventListener("online", resumed);

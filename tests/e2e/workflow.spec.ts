@@ -11,6 +11,17 @@ test("operator administration, paired tablet, offline reload and manager access"
     viewport: { width: 1440, height: 1000 },
   });
   const admin = await adminContext.newPage();
+  const dataReads: string[] = [];
+  admin.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (
+      request.method() === "GET" &&
+      /^\/api\/admin\/(settings|employees|records|reviews|payroll|holidays|adjustments|accounts|devices|audit|settlements|attendance-week)$/.test(
+        path,
+      )
+    )
+      dataReads.push(path);
+  });
   admin.on("pageerror", (error) => errors.push(error.message));
   await admin.goto("/");
   await admin.getByLabel("초기 설정 코드").fill("test-only-setup-token");
@@ -24,10 +35,19 @@ test("operator administration, paired tablet, offline reload and manager access"
     ),
   ).toBe(true);
   await admin.getByLabel("비밀번호", { exact: true }).fill("Qa_owner1!");
+  const initialWeek = admin.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/admin/attendance-week",
+  );
   await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
   await expect(
     admin.getByRole("heading", { name: "대시보드", exact: true }),
   ).toBeVisible();
+  await initialWeek;
+  expect(dataReads).toEqual([
+    "/api/admin/settings",
+    "/api/admin/attendance-week",
+  ]);
   await admin.getByRole("button", { name: "직원·시급", exact: true }).click();
   await admin.getByRole("button", { name: "조교 등록", exact: true }).click();
   let dialog = admin.getByRole("dialog");
@@ -38,6 +58,15 @@ test("operator administration, paired tablet, offline reload and manager access"
   await dialog.getByRole("button", { name: "저장하기" }).click();
   await expect(dialog).not.toBeVisible();
   await expect(admin.getByText("0012", { exact: true })).toBeVisible();
+  const staffReads = dataReads.filter(
+    (path) => path === "/api/admin/employees",
+  ).length;
+  await admin.getByRole("button", { name: "대시보드", exact: true }).click();
+  await admin.getByRole("button", { name: "직원·시급", exact: true }).click();
+  await expect(admin.getByText("0012", { exact: true })).toBeVisible();
+  expect(
+    dataReads.filter((path) => path === "/api/admin/employees").length,
+  ).toBe(staffReads);
   await admin.getByRole("button", { name: "정보 수정", exact: true }).click();
   dialog = admin.getByRole("dialog");
   await dialog.getByLabel("메모").fill("데스크 조교");
@@ -48,7 +77,38 @@ test("operator administration, paired tablet, offline reload and manager access"
   dialog = admin.getByRole("dialog");
   await expect(dialog.getByText("최초 등록", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "닫기" }).click();
+  // A stale holiday cache must cause one reconciliation, never a request loop.
+  let calendarReads = 0,
+    holidayReads = 0;
+  await admin.route("**/api/admin/holiday-calendar", async (route) => {
+    calendarReads++;
+    const response = await route.fetch();
+    const body = await response.json();
+    body.years = [
+      {
+        year: 2026,
+        count: 1,
+        fingerprint: "qa-calendar-version",
+        synced_at: null,
+        attempted_at: null,
+        checked_at: null,
+        error: "",
+        pending: null,
+      },
+    ];
+    await route.fulfill({ response, json: body });
+  });
+  await admin.route("**/api/admin/holidays", async (route) => {
+    holidayReads++;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await route.continue();
+  });
   await admin.getByRole("button", { name: "설정", exact: true }).click();
+  await expect.poll(() => calendarReads).toBe(2);
+  await expect.poll(() => holidayReads).toBe(2);
+  await expect(admin.getByText("인증키 미등록", { exact: true })).toBeVisible();
+  expect(calendarReads).toBe(2);
+  await admin.unrouteAll({ behavior: "wait" });
   await expect(admin.getByText("인증키 미등록", { exact: true })).toBeVisible();
   await expect(
     admin.getByRole("button", { name: "공휴일 동기화", exact: true }),
@@ -599,11 +659,26 @@ test("operator administration, paired tablet, offline reload and manager access"
   await admin.bringToFront();
   await admin.clock.install();
   await admin.getByRole("button", { name: "근무기록", exact: true }).click();
+  await expect(admin.getByLabel("근무 직원 필터")).toBeVisible();
   const reads: string[] = [];
   admin.on("request", (request) => {
     if (request.method() === "GET" && request.url().includes("/api/admin/"))
       reads.push(new URL(request.url()).pathname);
   });
+  await admin.clock.pauseAt(new Date(Date.now() + 1000));
+  await admin.getByLabel("조회 시작일").fill("2026-11-01");
+  await admin.getByLabel("조회 종료일").fill("2026-11-09");
+  const changedPeriod = admin.waitForResponse(
+    (response) =>
+      response.url().includes("/api/admin/records?") &&
+      response.url().includes("from=2026-11-01") &&
+      response.url().includes("to=2026-11-09"),
+  );
+  await admin.clock.runFor(250);
+  await changedPeriod;
+  await expect(admin.getByLabel("근무 직원 필터")).toBeVisible();
+  expect(reads).toEqual(["/api/admin/records"]);
+  reads.length = 0;
   await admin.clock.runFor(61000);
   await expect
     .poll(() => reads.filter((path) => path === "/api/admin/records").length)
