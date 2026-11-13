@@ -9,6 +9,7 @@ process.env.COOKIE_SECURE = "false";
 process.env.DB_PATH = join(folder, "test.db");
 process.env.SETUP_TOKEN = "test-only-setup-token";
 process.env.DISABLE_BACKUPS = "1";
+delete process.env.KASI_SERVICE_KEY;
 process.on("exit", () => {
   try {
     if (

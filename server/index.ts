@@ -14,6 +14,7 @@ import { secret } from "./security.ts";
 import { createApp } from "./app.ts";
 import { seoulDate } from "../shared/time.ts";
 import { serveAndroidDownload } from "./android-download.ts";
+import { HolidayCalendarService } from "./holiday-calendar.ts";
 
 const production = process.env.NODE_ENV === "production";
 const dbPath = process.env.DB_PATH || "data/feeledu.db";
@@ -33,7 +34,11 @@ if (!db.prepare("SELECT id FROM admins LIMIT 1").get())
   console.log(
     `\n최초 운영자 설정 코드: ${setupToken}\n관리자 화면에서 이 코드를 입력해 주세요.\n`,
   );
-const app = createApp({ db, setupToken, production });
+const calendar = new HolidayCalendarService(
+  db,
+  () => process.env.KASI_SERVICE_KEY,
+);
+const app = createApp({ db, setupToken, production, calendar });
 app.all("/downloads/{*file}", serveAndroidDownload);
 let devServer: { close: () => Promise<void> } | undefined;
 if (production) {
@@ -102,13 +107,25 @@ void dailyBackup();
 const timer = setInterval(() => void dailyBackup(), 60 * 60 * 1000);
 timer.unref();
 let stopping = false;
+let activeCalendar: Promise<void> | undefined;
+const refreshCalendar = () => {
+  if (stopping || activeCalendar || !calendar.configured) return;
+  activeCalendar = calendar.refreshCurrentYears().finally(() => {
+    activeCalendar = undefined;
+  });
+};
+refreshCalendar();
+const calendarTimer = setInterval(refreshCalendar, 3600000);
+calendarTimer.unref();
 async function stop() {
   if (stopping) return;
   stopping = true;
   clearInterval(timer);
+  clearInterval(calendarTimer);
   await devServer?.close();
   server.close(async () => {
     await activeBackup?.catch(() => {});
+    await activeCalendar?.catch(() => {});
     db.close();
     process.exit(0);
   });

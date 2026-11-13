@@ -1,5 +1,5 @@
 import { z } from "zod";
-export const snapshotTables = [
+export const legacySnapshotTables = [
   "admins",
   "employees",
   "rates",
@@ -13,6 +13,11 @@ export const snapshotTables = [
   "settlements",
   "audit",
 ] as const;
+export const snapshotTables = [
+  ...legacySnapshotTables,
+  "holiday_calendars",
+  "official_holidays",
+] as const;
 const row = z.record(
   z.string(),
   z.union([z.string(), z.number().finite(), z.null()]),
@@ -21,18 +26,35 @@ export const snapshotSchema = z
   .object({
     format: z.literal("feeledu-snapshot"),
     version: z.literal(1),
-    schema: z.literal(3),
+    schema: z.union([z.literal(3), z.literal(4)]),
     created_at: z.iso.datetime(),
     tables: z
-      .object(
-        Object.fromEntries(
-          snapshotTables.map((table) => [table, z.array(row).max(100000)]),
-        ) as Record<(typeof snapshotTables)[number], z.ZodArray<typeof row>>,
-      )
+      .object({
+        ...(Object.fromEntries(
+          legacySnapshotTables.map((table) => [
+            table,
+            z.array(row).max(100000),
+          ]),
+        ) as Record<
+          (typeof legacySnapshotTables)[number],
+          z.ZodArray<typeof row>
+        >),
+        holiday_calendars: z.array(row).max(100000).optional(),
+        official_holidays: z.array(row).max(100000).optional(),
+      })
       .strict(),
     checksum: z.string().regex(/^[a-f0-9]{64}$/),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      value.schema === 4
+        ? value.tables.holiday_calendars !== undefined &&
+          value.tables.official_holidays !== undefined
+        : value.tables.holiday_calendars === undefined &&
+          value.tables.official_holidays === undefined,
+    "백업의 공휴일 테이블 구성이 올바르지 않습니다.",
+  );
 
 /** Runs locally in the browser. The file never leaves the device. */
 export async function inspectSnapshot(input: unknown) {

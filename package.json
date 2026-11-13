@@ -39,6 +39,7 @@
     "@noble/hashes": "2.4.0",
     "express": "5.3.0",
     "express-rate-limit": "8.7.3",
+    "fast-xml-parser": "5.12.0",
     "helmet": "8.3.0",
     "idb": "8.0.4",
     "lucide-react": "1.70.0",

@@ -17,6 +17,7 @@ import { api, ApiError } from "../api.ts";
 import { Alert, Empty, Field, Help } from "../ui.tsx";
 import { useAdmin } from "./context.tsx";
 import { AccountForm, PasswordForm } from "./forms.tsx";
+import HolidayCalendarPanel from "./HolidayCalendarPanel.tsx";
 
 export default function SettingsPage() {
   const { admin, data, mutate, open } = useAdmin();
@@ -26,6 +27,12 @@ export default function SettingsPage() {
   } | null>(null);
   const [pairError, setPairError] = useState("");
   const [pairBusy, setPairBusy] = useState(false);
+  const [holidayYear, setHolidayYear] = useState(
+    Number(seoulDate().slice(0, 4)),
+  );
+  const holidays = data.holidays.filter((holiday) =>
+    holiday.date.startsWith(String(holidayYear) + "-"),
+  );
   async function pair(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -56,6 +63,7 @@ export default function SettingsPage() {
             <h2>휴일·공휴일</h2>
           </div>
         </div>
+        <HolidayCalendarPanel year={holidayYear} setYear={setHolidayYear} />
         <form
           className="inline-form"
           onSubmit={async (e) => {
@@ -88,35 +96,46 @@ export default function SettingsPage() {
         </form>
         <Help title="휴일 등록 기준">
           <p className="small muted inset">
-            공휴일 목록은 자동 등록되지 않습니다. 대체·임시공휴일을 포함해 해당
-            연도 날짜를 등록해 주세요. 같은 날에 여러 휴일 조건이 겹쳐도 가산은
-            한 번 적용합니다.
+            학원 자체 휴일이나 공식 자료에 아직 반영되지 않은 날짜를 수동 추가할
+            수 있습니다. 공식 자료와 주말·수동 휴일이 겹쳐도 가산은 한 번
+            적용합니다. 기념일 전체를 공휴일로 취급하지 않습니다.
           </p>
         </Help>
-        {data.holidays.length ? (
+        {holidays.length ? (
           <div className="holiday-list">
-            {data.holidays.map((h) => (
+            {holidays.map((h) => (
               <div className="holiday-row" key={h.id}>
                 <span>{h.date}</span>
                 <strong>{h.name}</strong>
-                <button
-                  className="icon-button danger"
-                  aria-label={`${h.name} 삭제`}
-                  onClick={() => {
-                    if (
-                      confirm(
-                        `${h.date} ${h.name} 휴일을 삭제할까요? 해당 날짜의 예상 급여가 다시 계산됩니다.`,
+                <span className="badge">
+                  {h.source === "official"
+                    ? "공식"
+                    : h.source === "both"
+                      ? "공식·수동"
+                      : "수동"}
+                </span>
+                {h.source !== "official" && (
+                  <button
+                    className="icon-button danger"
+                    aria-label={`${h.name} 삭제`}
+                    onClick={() => {
+                      if (
+                        confirm(
+                          h.source === "both"
+                            ? `${h.date} 수동 등록을 삭제할까요? 공식 공휴일은 유지됩니다.`
+                            : `${h.date} ${h.name} 휴일을 삭제할까요? 해당 날짜의 예상 급여가 다시 계산됩니다.`,
+                        )
                       )
-                    )
-                      void mutate(
-                        `/admin/holidays/${h.id}`,
-                        undefined,
-                        "DELETE",
-                      );
-                  }}
-                >
-                  <Trash2 size={16} />
-                </button>
+                        void mutate(
+                          `/admin/holidays/${h.id}`,
+                          undefined,
+                          "DELETE",
+                        );
+                    }}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
               </div>
             ))}
           </div>

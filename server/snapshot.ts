@@ -17,7 +17,7 @@ export function exportSnapshot(db: Db) {
   return {
     format: "feeledu-snapshot" as const,
     version: 1 as const,
-    schema: 3 as const,
+    schema: 4 as const,
     created_at: new Date().toISOString(),
     tables,
     checksum: checksum(tables),
@@ -52,7 +52,7 @@ export function importSnapshotIntoEmptyDatabase(db: Db, input: unknown) {
         .prepare(`PRAGMA table_info(${table})`)
         .all()
         .map((column) => String(column.name));
-      for (const item of snapshot.tables[table]) {
+      for (const item of snapshot.tables[table] ?? []) {
         if (
           Object.keys(item).some((column) => !columns.includes(column)) ||
           columns.some((column) => !(column in item))
@@ -67,6 +67,6 @@ export function importSnapshotIntoEmptyDatabase(db: Db, input: unknown) {
       throw new Error("백업의 연결된 기록을 확인해 주세요.");
   });
   return Object.fromEntries(
-    snapshotTables.map((table) => [table, snapshot.tables[table].length]),
+    snapshotTables.map((table) => [table, snapshot.tables[table]?.length ?? 0]),
   );
 }

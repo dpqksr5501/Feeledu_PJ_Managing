@@ -1,0 +1,17 @@
+.holiday-calendar {
+  padding: 0 24px 20px;
+}
+.holiday-calendar > .row {
+  flex-wrap: wrap;
+  align-items: end;
+}
+.holiday-calendar .field {
+  min-width: 100px;
+}
+.holiday-row > .badge {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.holiday-row > button {
+  margin-left: 0;
+}

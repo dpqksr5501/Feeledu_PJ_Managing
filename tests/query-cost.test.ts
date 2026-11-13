@@ -29,6 +29,7 @@ test("ten years of history keeps indexed Cloudflare row reads bounded and result
     expect(response.status).toBe(200);
     const result = (await response.json()) as {
       equivalent: boolean;
+      calendarSynced: boolean;
       before: Record<string, { reads: number; writes: number }>;
       after: Record<string, { reads: number; writes: number }>;
     };
@@ -36,6 +37,7 @@ test("ten years of history keeps indexed Cloudflare row reads bounded and result
     mkdirSync(".tmp", { recursive: true });
     writeFileSync(".tmp/query-cost.json", JSON.stringify(result, null, 2));
     expect(result.equivalent).toBe(true);
+    expect(result.calendarSynced).toBe(true);
     for (const key of [
       "overlap",
       "week",

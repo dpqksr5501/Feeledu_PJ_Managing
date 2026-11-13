@@ -49,6 +49,13 @@ test("operator administration, paired tablet, offline reload and manager access"
   await expect(dialog.getByText("최초 등록", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "닫기" }).click();
   await admin.getByRole("button", { name: "설정", exact: true }).click();
+  await expect(admin.getByText("인증키 미등록", { exact: true })).toBeVisible();
+  await expect(
+    admin.getByRole("button", { name: "공휴일 동기화", exact: true }),
+  ).toBeDisabled();
+  await expect(admin.getByLabel("공휴일 조회 연도")).toHaveValue(
+    String(new Date(Date.now() + 9 * 3600000).getUTCFullYear()),
+  );
   await admin.getByLabel("위 산식과 적용 조건을 확인했습니다.").check();
   await admin.getByRole("button", { name: "계산 기준 저장" }).click();
   await expect(admin.getByText("확인 완료", { exact: true })).toBeVisible();

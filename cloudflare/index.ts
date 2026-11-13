@@ -19,21 +19,29 @@ import { seoulDate } from "../shared/time.ts";
 import { durableDatabase } from "./database.ts";
 import * as security from "./security.ts";
 import { androidDownload } from "../shared/android-download.ts";
+import { HolidayCalendarService } from "../server/holiday-calendar.ts";
 
 interface Env {
   ACADEMY: DurableObjectNamespace<Academy>;
   ASSETS: Fetcher;
   SETUP_TOKEN: string;
   MIGRATION_TOKEN?: string;
+  KASI_SERVICE_KEY?: string;
 }
 export class Academy extends DurableObject<Env> {
   private db: Db;
   private server?: Server;
   private port = 0;
+  private calendar: HolidayCalendarService;
+  private nextCalendarCheck = 0;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.db = durableDatabase(ctx.storage);
     initializeDb(this.db);
+    this.calendar = new HolidayCalendarService(
+      this.db,
+      () => this.env.KASI_SERVICE_KEY,
+    );
     this.db.exec(
       "CREATE TABLE IF NOT EXISTS cloud_rate_limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS cloud_limits_expiry ON cloud_rate_limits(expires_at)",
     );
@@ -90,6 +98,7 @@ export class Academy extends DurableObject<Env> {
       kioskLimit: this.limit("kiosk", 180, 60000),
       router: () => express.Router(),
       secureCookie: true,
+      calendar: this.calendar,
       downloadBackup: async (req, res) => {
         audit(
           this.db,
@@ -158,13 +167,32 @@ export class Academy extends DurableObject<Env> {
         );
       }
     }
+    if (this.calendar.configured && Date.now() >= this.nextCalendarCheck) {
+      this.nextCalendarCheck = Date.now() + 3600000;
+      this.ctx.waitUntil(this.calendar.refreshCurrentYears());
+    }
     if (!this.server) this.serve(url.origin);
     const response = await handleAsNodeRequest(this.port, request);
     await this.ctx.storage.sync();
     return response;
   }
+  async refreshHolidays() {
+    await this.calendar.refreshCurrentYears();
+  }
 }
 export default {
+  async scheduled(
+    _event: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ) {
+    if (env.KASI_SERVICE_KEY)
+      ctx.waitUntil(
+        env.ACADEMY.getByName("feeledu-primary", {
+          locationHint: "apac",
+        }).refreshHolidays(),
+      );
+  },
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/downloads/"))

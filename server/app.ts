@@ -9,15 +9,18 @@ import { audit, type Db } from "./db.ts";
 import * as security from "./security.ts";
 import { registerRoutes } from "./routes.ts";
 import { seoulDate } from "../shared/time.ts";
+import { HolidayCalendarService } from "./holiday-calendar.ts";
 
 export function createApp({
   db,
   setupToken,
   production = false,
+  calendar = new HolidayCalendarService(db, () => process.env.KASI_SERVICE_KEY),
 }: {
   db: Db;
   setupToken: string;
   production?: boolean;
+  calendar?: HolidayCalendarService;
 }) {
   const app = createHttpApp({
     production,
@@ -46,6 +49,7 @@ export function createApp({
     kioskLimit,
     router: () => express.Router(),
     secureCookie: production && process.env.COOKIE_SECURE !== "false",
+    calendar,
     downloadBackup: async (req, res) => {
       mkdirSync("data/backups", { recursive: true });
       const path = resolve("data/backups", `download-${randomUUID()}.db`);

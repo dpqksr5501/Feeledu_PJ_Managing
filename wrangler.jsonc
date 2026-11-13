@@ -17,4 +17,5 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Academy"] }],
   "observability": { "enabled": false },
+  "triggers": { "crons": ["17 20 * * *"] },
 }

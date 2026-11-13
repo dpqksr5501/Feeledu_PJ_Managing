@@ -3,6 +3,7 @@ import { shiftRangeSql } from "./shift-query.ts";
 import { addDays, dayStart, seoulDate, weekStart } from "../shared/time.ts";
 import { paidMillisecondsInRange } from "../shared/shift-duration.ts";
 import { holidayName } from "../shared/workdays.ts";
+import { getHolidays } from "./holidays.ts";
 import type {
   AttendanceDay,
   Employee,
@@ -22,9 +23,7 @@ export function attendanceWeek(
     to = addDays(from, 6);
   const begin = dayStart(from),
     finish = dayStart(addDays(to, 1));
-  const holidays = db
-    .prepare("SELECT * FROM holidays")
-    .all() as unknown as Holiday[];
+  const holidays = getHolidays(db, from, to);
   const newDays = (): AttendanceDay[] =>
     Array.from({ length: 7 }, (_, i) => {
       const date = addDays(from, i);

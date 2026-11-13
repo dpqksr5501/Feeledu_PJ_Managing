@@ -1,23 +1,22 @@
 export class ApiError extends Error {
   status: number;
-  constructor(
-    message: string,
-    status: number,
-    public retryAfterMs = 0,
-  ) {
+  retryAfterMs: number;
+  constructor(message: string, status: number, retryAfterMs = 0) {
     super(message);
     this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 export async function api<T>(
   path: string,
   options: RequestInit = {},
+  timeoutMs = 10000,
 ): Promise<T> {
   const response = await fetch("/api" + path, {
     ...options,
     signal: options.signal
-      ? AbortSignal.any([options.signal, AbortSignal.timeout(10000)])
-      : AbortSignal.timeout(10000),
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)])
+      : AbortSignal.timeout(timeoutMs),
     credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",

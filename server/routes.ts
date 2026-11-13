@@ -12,6 +12,8 @@ import { audit, getPolicy, transaction, type Db } from "./database.ts";
 import { calculatePayroll } from "./payroll.ts";
 import { attendanceWeek } from "./attendance.ts";
 import { overlappingShift, shiftRangeSql } from "./shift-query.ts";
+import { HolidayCalendarService } from "./holiday-calendar.ts";
+import { getHolidays } from "./holidays.ts";
 import { addDays, dayStart, seoulDate } from "../shared/time.ts";
 import type { Admin, ClockEvent, Device, Shift } from "../shared/types.ts";
 import {
@@ -133,6 +135,7 @@ export function registerRoutes(
     router,
     downloadBackup,
     secureCookie = true,
+    calendar,
   }: {
     db: Db;
     setupToken: string;
@@ -142,6 +145,7 @@ export function registerRoutes(
     router: () => Router;
     downloadBackup: (req: Request, res: Response) => Promise<void>;
     secureCookie?: boolean;
+    calendar?: HolidayCalendarService;
   },
 ) {
   const {
@@ -153,6 +157,8 @@ export function registerRoutes(
     secureEqual,
   } = security;
   initializeAuthState(db);
+  const holidayCalendar =
+    calendar ?? new HolidayCalendarService(db, () => undefined);
   const dummyPasswordHash = passwordHash(secret());
   function checkBackoff(res: Response, key: string) {
     const seconds = authBackoff(db, key);
@@ -859,9 +865,60 @@ export function registerRoutes(
     });
     res.json({ ok: true });
   });
-  admin.get("/holidays", (_req, res) =>
-    res.json(db.prepare("SELECT * FROM holidays ORDER BY date").all()),
+  admin.get("/holiday-calendar", (_req, res) =>
+    res.json(holidayCalendar.status()),
   );
+  admin.post(
+    "/holiday-calendar/sync",
+    sensitiveLimit,
+    async (req: Authed, res) => {
+      const { year } = z
+        .object({
+          year: z
+            .number()
+            .int()
+            .min(2000)
+            .max(Number(seoulDate().slice(0, 4)) + 1),
+        })
+        .parse(req.body);
+      try {
+        res.json(await holidayCalendar.sync(year, req.admin!.id));
+      } catch (error) {
+        res
+          .status(503)
+          .json({
+            error: error instanceof Error ? error.message : "공휴일 갱신 실패",
+          });
+      }
+    },
+  );
+  for (const action of ["approve", "confirm"] as const)
+    admin.post(`/holiday-calendar/${action}`, (req: Authed, res) => {
+      const body = z
+        .object({
+          year: z.number().int().min(2000).max(2100),
+          expected: z.string().regex(/^[a-f0-9]{64}$/),
+          reason,
+        })
+        .parse(req.body);
+      try {
+        holidayCalendar[action](
+          body.year,
+          body.expected,
+          body.reason,
+          req.admin!.id,
+        );
+        res.json({ ok: true });
+      } catch {
+        res
+          .status(409)
+          .json({
+            error:
+              "공휴일 자료가 변경됐거나 검토가 필요합니다. 새로고침해 주세요.",
+          });
+      }
+    });
+  admin.get("/holidays", (_req, res) => res.json(getHolidays(db)));
   admin.post("/holidays", (req: Authed, res) => {
     const body = z.object({ date, name: text }).parse(req.body);
     const id = randomUUID();
@@ -941,7 +998,7 @@ export function registerRoutes(
   });
   admin.get("/payroll", (req, res) => {
     const { from, to } = period.parse(req.query);
-    res.json(calculatePayroll(db, from, to));
+    res.json(calculatePayroll(db, from, to, holidayCalendar.configured));
   });
   admin.post("/settlements", (req: Authed, res) => {
     const body = period
@@ -962,7 +1019,12 @@ export function registerRoutes(
           409,
           "다른 확정 기간과 겹칩니다. 기존 정산과 동일한 기간을 선택해 주세요.",
         );
-      const payroll = calculatePayroll(db, body.from, body.to);
+      const payroll = calculatePayroll(
+        db,
+        body.from,
+        body.to,
+        holidayCalendar.configured,
+      );
       if (payroll.fingerprint !== body.fingerprint)
         fail(409, "계산 기준이 변경됐습니다. 새로고침 후 다시 확인해 주세요.");
       if (

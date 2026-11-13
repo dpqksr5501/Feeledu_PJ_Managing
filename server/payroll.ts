@@ -19,8 +19,14 @@ import { getPolicy, type Db } from "./database.ts";
 import { holidayName } from "../shared/workdays.ts";
 import { paidMillisecondsInRange } from "../shared/shift-duration.ts";
 import { shiftRangeSql } from "./shift-query.ts";
+import { calendarWarnings, getHolidays } from "./holidays.ts";
 
-export function calculatePayroll(db: Db, from: string, to: string): Payroll {
+export function calculatePayroll(
+  db: Db,
+  from: string,
+  to: string,
+  requireCalendar = false,
+): Payroll {
   const policy = getPolicy(db);
   const firstWeek = weekStart(from, policy.weekStartsOn);
   const end = dayStart(addDays(to, 1));
@@ -41,9 +47,7 @@ export function calculatePayroll(db: Db, from: string, to: string): Payroll {
       UNION ALL SELECT * FROM rates WHERE effective_from>? AND effective_from<=? ORDER BY effective_from`,
     )
     .all(firstWeek, firstWeek, to) as unknown as Rate[];
-  const holidayRows = db
-    .prepare("SELECT * FROM holidays")
-    .all() as unknown as Holiday[];
+  const holidayRows = getHolidays(db, firstWeek, to);
   const holidays = new Set(holidayRows.map((h) => h.date));
   const adjustments = db
     .prepare("SELECT * FROM adjustments WHERE date BETWEEN ? AND ? ORDER BY id")
@@ -51,7 +55,12 @@ export function calculatePayroll(db: Db, from: string, to: string): Payroll {
   const dayRates = db
     .prepare("SELECT * FROM day_rates WHERE date BETWEEN ? AND ? ORDER BY date")
     .all(firstWeek, to);
-  const warnings: string[] = [];
+  const warnings: string[] = calendarWarnings(
+    db,
+    firstWeek,
+    to,
+    requireCalendar,
+  );
   if (!policy.confirmed)
     warnings.push(
       "수당 기준이 아직 확인되지 않았습니다. 설정에서 확인 후 저장해 주세요.",

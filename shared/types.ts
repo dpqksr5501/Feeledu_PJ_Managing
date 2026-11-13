@@ -74,7 +74,32 @@ export type Policy = {
   holidayWeekdays: number[];
   confirmed: boolean;
 };
-export type Holiday = { id: string; date: string; name: string };
+export type Holiday = {
+  id: string;
+  date: string;
+  name: string;
+  source?: "manual" | "official" | "both";
+};
+export type CalendarDay = { date: string; name: string };
+export type CalendarYear = {
+  year: number;
+  synced_at: string | null;
+  attempted_at: string | null;
+  checked_at: string | null;
+  error: string;
+  fingerprint: string;
+  count: number;
+  pending: null | {
+    hash: string;
+    added: CalendarDay[];
+    removed: CalendarDay[];
+    changed: CalendarDay[];
+  };
+};
+export type HolidayCalendarStatus = {
+  configured: boolean;
+  years: CalendarYear[];
+};
 export type Adjustment = {
   id: string;
   employee_id: string;

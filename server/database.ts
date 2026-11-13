@@ -32,7 +32,7 @@ export function initializeDb(db: Db) {
     const version = db
       .prepare("SELECT MAX(version) AS n FROM schema_version")
       .get() as { n: number };
-    if (version.n > 3) {
+    if (version.n > 4) {
       db.close();
       throw new Error(
         "이 데이터베이스는 더 최신 앱 버전으로 생성됐습니다. 앱을 업데이트해 주세요.",
@@ -115,7 +115,16 @@ export function initializeDb(db: Db) {
       reason TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(employee_id,date));`);
     db.prepare("INSERT OR IGNORE INTO schema_version VALUES(3)").run();
   });
-  // Additive indexes keep the portable schema-3 backup format compatible.
+  transaction(db, () => {
+    db.exec(`CREATE TABLE IF NOT EXISTS holiday_calendars (
+      year INTEGER PRIMARY KEY, synced_at TEXT, attempted_at TEXT, checked_at TEXT,
+      error TEXT NOT NULL DEFAULT '', fingerprint TEXT NOT NULL DEFAULT '',
+      pending_json TEXT, pending_hash TEXT);
+      CREATE TABLE IF NOT EXISTS official_holidays (
+      date TEXT PRIMARY KEY, name TEXT NOT NULL, year INTEGER NOT NULL REFERENCES holiday_calendars(year));`);
+    db.prepare("INSERT OR IGNORE INTO schema_version VALUES(4)").run();
+  });
+  // Additive indexes are safe to recreate when restoring an older backup.
   // Only pending events enter this index; accepted history costs no index writes.
   db.exec(`
     CREATE INDEX IF NOT EXISTS shifts_end ON shifts(ended_at,started_at);

@@ -2,9 +2,18 @@ import type { Server } from "node:http";
 import { once } from "node:events";
 import { openDb, getPolicy } from "../server/db.ts";
 import { createApp } from "../server/app.ts";
-export async function fixture() {
+import type { Db } from "../server/database.ts";
+import { HolidayCalendarService } from "../server/holiday-calendar.ts";
+export async function fixture(
+  calendarFactory?: (db: Db) => HolidayCalendarService,
+) {
   const db = openDb(":memory:");
-  const app = createApp({ db, setupToken: "test-token" });
+  const app = createApp({
+    db,
+    setupToken: "test-token",
+    calendar:
+      calendarFactory?.(db) ?? new HolidayCalendarService(db, () => undefined),
+  });
   const server: Server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address() as { port: number };

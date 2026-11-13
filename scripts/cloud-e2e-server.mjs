@@ -16,6 +16,8 @@ const child = spawn(
     folder,
     "--var",
     "SETUP_TOKEN:test-only-setup-token",
+    "--var",
+    "KASI_SERVICE_KEY:",
   ],
   {
     stdio: "inherit",

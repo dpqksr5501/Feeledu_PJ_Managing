@@ -24,6 +24,10 @@ Dependencies: `npm audit` includes production and development packages. Run it a
 
 2026-11-12 reliability follow-up: queued clock events now require a valid JSON acknowledgement before removal. Retry backoff respects `Retry-After` and stops for revoked tokens; Web Locks serialize shared queues across supported browser tabs. Saturated Cloudflare request limits no longer keep incrementing persistent counters. Owner/password backup controls remain in place, and JSON integrity checking runs locally without uploading the file. Additive indexes and bounded period queries preserve schema-3 backup compatibility. See [operations and measured query costs](OPERATIONS.md) for backup, restore and free-tier limits. These checks are not a guarantee against all defects or attacks.
 
+## Holiday integration (2026-11-13)
+
+2026-11-13 holiday integration: provider credentials are optional server secrets and are excluded from all snapshots. Outbound requests use a fixed HTTPS endpoint, disallow redirects, bound response size/time/concurrency/pages and reject DTD/entities. Complete calendars are applied transactionally; withdrawals require versioned administrator review. Manual holidays and finalized settlements are preserved. Tests use synthetic provider responses and explicitly clear local provider credentials. See [setup and failure handling](HOLIDAY_API.md). Live provider authentication requires the owner's key and is separate from fixture verification.
+
 ## References
 
 - https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
