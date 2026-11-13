@@ -97,7 +97,8 @@ test("splits midnight/month/rate/holiday boundaries and proportionally allocates
     base: 35000,
     holiday: 12500,
     weekly: 0,
-    total: 47500,
+    night: 17500,
+    total: 65000,
   });
   expect(calculatePayroll(f.db, "2026-10-31", "2026-10-31").rows[0].base).toBe(
     10000,

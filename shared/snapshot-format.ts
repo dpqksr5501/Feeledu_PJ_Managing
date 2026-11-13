@@ -17,6 +17,7 @@ export const snapshotTables = [
   ...legacySnapshotTables,
   "holiday_calendars",
   "official_holidays",
+  "shift_breaks",
 ] as const;
 const row = z.record(
   z.string(),
@@ -26,7 +27,7 @@ export const snapshotSchema = z
   .object({
     format: z.literal("feeledu-snapshot"),
     version: z.literal(1),
-    schema: z.union([z.literal(3), z.literal(4)]),
+    schema: z.union([z.literal(3), z.literal(4), z.literal(5)]),
     created_at: z.iso.datetime(),
     tables: z
       .object({
@@ -41,6 +42,7 @@ export const snapshotSchema = z
         >),
         holiday_calendars: z.array(row).max(100000).optional(),
         official_holidays: z.array(row).max(100000).optional(),
+        shift_breaks: z.array(row).max(100000).optional(),
       })
       .strict(),
     checksum: z.string().regex(/^[a-f0-9]{64}$/),
@@ -48,12 +50,15 @@ export const snapshotSchema = z
   .strict()
   .refine(
     (value) =>
-      value.schema === 4
+      (value.schema >= 4
         ? value.tables.holiday_calendars !== undefined &&
           value.tables.official_holidays !== undefined
         : value.tables.holiday_calendars === undefined &&
-          value.tables.official_holidays === undefined,
-    "백업의 공휴일 테이블 구성이 올바르지 않습니다.",
+          value.tables.official_holidays === undefined) &&
+      (value.schema === 5
+        ? value.tables.shift_breaks !== undefined
+        : value.tables.shift_breaks === undefined),
+    "백업의 스키마별 테이블 구성이 올바르지 않습니다.",
   );
 
 /** Runs locally in the browser. The file never leaves the device. */

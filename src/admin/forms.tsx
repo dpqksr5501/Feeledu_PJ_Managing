@@ -8,6 +8,7 @@ import type {
   Admin,
   Employee,
   Shift,
+  ShiftBreak,
   ReviewEvent,
 } from "../../shared/types.ts";
 import { seoulDate, money, hours } from "../../shared/time.ts";
@@ -358,12 +359,38 @@ export function ShiftForm({ shift }: { shift?: Shift }) {
     start && end
       ? Date.parse(toShiftInstant(end)!) - Date.parse(toShiftInstant(start)!)
       : null;
+  const [preciseBreaks, setPreciseBreaks] = useState(!!shift?.breaks?.length);
+  const [breaks, setBreaks] = useState<
+    { start: string; end: string; original?: ShiftBreak }[]
+  >(
+    (shift?.breaks ?? []).map((item) => ({
+      start: localDateTime(item.started_at),
+      end: localDateTime(item.ended_at),
+      original: item,
+    })),
+  );
+  const breakMinutes = breaks.reduce(
+    (sum, item) =>
+      sum +
+      (Date.parse(toShiftInstant(item.end) ?? "") -
+        Date.parse(toShiftInstant(item.start) ?? "")) /
+        60000,
+    0,
+  );
   return (
     <ActionForm
       submit={async (form) => {
         const startedAt = toShiftInstant(start, shift?.started_at)!;
         const endedAt = toShiftInstant(end, shift?.ended_at);
-        const breakMinutes = Number(form.get("break_minutes"));
+        const minutes = preciseBreaks
+          ? breakMinutes
+          : Number(form.get("break_minutes"));
+        if (!Number.isInteger(minutes) || minutes < 0) {
+          setError(
+            "휴게 구간의 시작·종료를 입력해 주세요. 합계는 1분 단위여야 합니다.",
+          );
+          return false;
+        }
         if (
           endedAt &&
           (Date.parse(endedAt) <= Date.parse(startedAt) ||
@@ -376,7 +403,7 @@ export function ShiftForm({ shift }: { shift?: Shift }) {
         }
         if (
           endedAt &&
-          breakMinutes * 60000 >= Date.parse(endedAt) - Date.parse(startedAt)
+          minutes * 60000 >= Date.parse(endedAt) - Date.parse(startedAt)
         ) {
           setError("휴게시간은 전체 근무시간보다 짧아야 합니다.");
           return false;
@@ -388,7 +415,16 @@ export function ShiftForm({ shift }: { shift?: Shift }) {
             employee_id: form.get("employee_id"),
             started_at: startedAt,
             ended_at: endedAt,
-            break_minutes: breakMinutes,
+            break_minutes: minutes,
+            breaks: preciseBreaks
+              ? breaks.map((item) => ({
+                  started_at: toShiftInstant(
+                    item.start,
+                    item.original?.started_at,
+                  ),
+                  ended_at: toShiftInstant(item.end, item.original?.ended_at),
+                }))
+              : [],
             note: form.get("note"),
             reason: form.get("reason"),
             ...(shift ? { revision: shift.revision } : {}),
@@ -468,20 +504,100 @@ export function ShiftForm({ shift }: { shift?: Shift }) {
         </button>
       )}
       {error && <Alert kind="error">{error}</Alert>}
-      <Field
-        label="실제 휴게시간 (분)"
-        hint="실제 휴게만 입력 · 자동 공제 없음"
-      >
+      <label className="check">
         <input
-          name="break_minutes"
-          type="number"
-          min="0"
-          max="1440"
-          step="1"
-          defaultValue={shift?.break_minutes || 0}
-          required
+          type="checkbox"
+          checked={preciseBreaks}
+          onChange={(event) => setPreciseBreaks(event.target.checked)}
         />
-      </Field>
+        실제 휴게 구간 입력
+      </label>
+      {preciseBreaks ? (
+        <div className="form-section">
+          {breaks.map((item, index) => (
+            <div className="form-grid" key={index}>
+              <Field label={`휴게 ${index + 1} 시작`}>
+                <input
+                  type="datetime-local"
+                  step="1"
+                  value={item.start}
+                  required
+                  onChange={(event) =>
+                    setBreaks(
+                      breaks.map((row, i) =>
+                        i === index
+                          ? { ...row, start: event.target.value }
+                          : row,
+                      ),
+                    )
+                  }
+                />
+              </Field>
+              <Field label={`휴게 ${index + 1} 종료`}>
+                <input
+                  type="datetime-local"
+                  step="1"
+                  value={item.end}
+                  required
+                  onChange={(event) =>
+                    setBreaks(
+                      breaks.map((row, i) =>
+                        i === index ? { ...row, end: event.target.value } : row,
+                      ),
+                    )
+                  }
+                />
+              </Field>
+              <button
+                type="button"
+                className="text-button danger"
+                onClick={() => setBreaks(breaks.filter((_, i) => i !== index))}
+              >
+                휴게 {index + 1} 삭제
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="button secondary"
+            disabled={breaks.length >= 10}
+            onClick={() =>
+              setBreaks([
+                ...breaks,
+                { start: "", end: "", original: undefined },
+              ])
+            }
+          >
+            휴게 구간 추가
+          </button>
+          <p className="small muted">
+            합계 {Number.isFinite(breakMinutes) ? breakMinutes : "—"}분 · 한국
+            시간 · 최대 10구간
+          </p>
+        </div>
+      ) : (
+        <Field
+          label="실제 휴게시간 (분)"
+          hint="실제 휴게만 입력 · 자동 공제 없음"
+        >
+          <input
+            name="break_minutes"
+            type="number"
+            min="0"
+            max="1440"
+            step="1"
+            defaultValue={shift?.break_minutes || 0}
+            required
+          />
+        </Field>
+      )}
+      <Help title="휴게·야간수당 계산">
+        <p className="small muted">
+          실제 휴게만 공제합니다. 야간 근무에 휴게가 있다면 구간을 입력해
+          주세요. 합계만 입력한 기존 기록은 날짜·야간 경계에서 비례 추정하며,
+          금액이 달라질 수 있는 기록은 정산 전 확인이 필요합니다.
+        </p>
+      </Help>
       <Field label="근무 메모">
         <input name="note" maxLength={500} defaultValue={shift?.note} />
       </Field>

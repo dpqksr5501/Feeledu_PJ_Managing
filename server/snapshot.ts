@@ -5,6 +5,8 @@ import {
 export { snapshotTables } from "../shared/snapshot-format.ts";
 import { createHash } from "node:crypto";
 import { transaction, type Db } from "./database.ts";
+import { attachShiftBreaks, breakError } from "./shift-breaks.ts";
+import type { Shift } from "../shared/types.ts";
 const checksum = (tables: unknown) =>
   createHash("sha256").update(JSON.stringify(tables)).digest("hex");
 export function exportSnapshot(db: Db) {
@@ -17,7 +19,7 @@ export function exportSnapshot(db: Db) {
   return {
     format: "feeledu-snapshot" as const,
     version: 1 as const,
-    schema: 4 as const,
+    schema: 5 as const,
     created_at: new Date().toISOString(),
     tables,
     checksum: checksum(tables),
@@ -65,6 +67,22 @@ export function importSnapshotIntoEmptyDatabase(db: Db, input: unknown) {
     }
     if (db.prepare("PRAGMA foreign_key_check").all().length)
       throw new Error("백업의 연결된 기록을 확인해 주세요.");
+    for (const shift of attachShiftBreaks(
+      db,
+      db
+        .prepare(
+          "SELECT s.* FROM shifts s WHERE EXISTS(SELECT 1 FROM shift_breaks b WHERE b.shift_id=s.id)",
+        )
+        .all() as unknown as Shift[],
+    )) {
+      const error = breakError(
+        shift.started_at,
+        shift.ended_at,
+        shift.break_minutes,
+        shift.breaks!,
+      );
+      if (error) throw new Error(error);
+    }
   });
   return Object.fromEntries(
     snapshotTables.map((table) => [table, snapshot.tables[table]?.length ?? 0]),

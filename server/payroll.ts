@@ -20,6 +20,8 @@ import { holidayName } from "../shared/workdays.ts";
 import { paidMillisecondsInRange } from "../shared/shift-duration.ts";
 import { shiftRangeSql } from "./shift-query.ts";
 import { calendarWarnings, getHolidays } from "./holidays.ts";
+import { attachShiftBreaks, breakError } from "./shift-breaks.ts";
+import { isNightTime, workSegmentEnd } from "../shared/night-work.ts";
 
 export function calculatePayroll(
   db: Db,
@@ -33,13 +35,16 @@ export function calculatePayroll(
   const employees = db
     .prepare("SELECT * FROM employees ORDER BY name")
     .all() as unknown as Employee[];
-  const shifts = db
-    .prepare(shiftRangeSql())
-    .all(
-      new Date(end).toISOString(),
-      new Date(dayStart(firstWeek)).toISOString(),
-      new Date(end).toISOString(),
-    ) as unknown as Shift[];
+  const shifts = attachShiftBreaks(
+    db,
+    db
+      .prepare(shiftRangeSql())
+      .all(
+        new Date(end).toISOString(),
+        new Date(dayStart(firstWeek)).toISOString(),
+        new Date(end).toISOString(),
+      ) as unknown as Shift[],
+  );
   const rates = db
     .prepare(
       `SELECT r.* FROM employees e JOIN rates r ON r.employee_id=e.id
@@ -83,6 +88,8 @@ export function calculatePayroll(
         seconds: 0,
         base: 0,
         holiday: 0,
+        night: 0,
+        nightSeconds: 0,
         weekly: 0,
         adjustment: 0,
         total: 0,
@@ -114,13 +121,45 @@ export function calculatePayroll(
           row.warnings.push("근무시간 또는 휴게시간을 확인해 주세요.");
           continue;
         }
-        // An entered total break is allocated proportionally across date/rate segments.
+        const invalidBreak = breakError(
+          shift.started_at,
+          shift.ended_at,
+          shift.break_minutes,
+          shift.breaks ?? [],
+        );
+        if (invalidBreak) {
+          row.warnings.push(`${seoulDate(start)} ${invalidBreak}`);
+          continue;
+        }
+        // Older total-only breaks remain proportional estimates. Never finalize
+        // an ambiguous night/rate/date allocation as if an actual break was known.
+        if (
+          policy.nightEnabled &&
+          shift.break_minutes > 0 &&
+          !shift.breaks?.length &&
+          finish > dayStart(from)
+        ) {
+          let hasNight = false,
+            hasDay = false;
+          for (let time = start; time < finish;) {
+            if (isNightTime(time)) hasNight = true;
+            else hasDay = true;
+            time = workSegmentEnd(time, finish);
+          }
+          if (
+            hasNight &&
+            (hasDay || seoulDate(start) !== seoulDate(finish - 1))
+          )
+            row.warnings.push(
+              `${seoulDate(start)} 야간 휴게 구간 미입력 · 비례 추정 중입니다. 근무기록 정정에서 실제 휴게 구간을 입력해 주세요.`,
+            );
+        }
         for (
           let cursor = Math.max(start, dayStart(firstWeek));
           cursor < Math.min(finish, end);
         ) {
           const date = seoulDate(cursor);
-          const next = Math.min(finish, end, dayStart(addDays(date, 1)));
+          const next = workSegmentEnd(cursor, Math.min(finish, end));
           const paidMilliseconds = paidMillisecondsInRange(shift, cursor, next);
           const seconds = paidMilliseconds / 1000;
           const rate = rateAt(date);
@@ -147,11 +186,19 @@ export function calculatePayroll(
                 base *
                 ((employee.holiday_multiplier ?? policy.holidayMultiplier) - 1);
             row.holiday += holiday;
+            const nightSeconds = isNightTime(cursor) ? seconds : 0;
+            const night = policy.nightEnabled
+              ? (nightSeconds / 3600) * rate * policy.nightPremiumRate
+              : 0;
+            row.nightSeconds! += nightSeconds;
+            row.night! += night;
             const daily = row.dailyDetails!.find((day) => day.date === date);
             if (daily) {
               daily.seconds += seconds;
               daily.base += base;
               daily.holiday += holiday;
+              daily.nightSeconds! += nightSeconds;
+              daily.night! += night;
             } else
               row.dailyDetails!.push({
                 date,
@@ -159,6 +206,8 @@ export function calculatePayroll(
                 hourlyRate: rate,
                 base,
                 holiday,
+                night,
+                nightSeconds,
                 specialRate: dayRates.some(
                   (r) => r.employee_id === employee.id && r.date === date,
                 ),
@@ -191,12 +240,15 @@ export function calculatePayroll(
         }
       row.base = Math.round(row.base);
       row.holiday = Math.round(row.holiday);
+      row.night = Math.round(row.night!);
+      row.nightSeconds = Math.round(row.nightSeconds!);
       row.weekly = Math.round(row.weekly);
       row.seconds = Math.round(row.seconds);
       row.adjustment = adjustments
         .filter((a) => a.employee_id === employee.id)
         .reduce((sum, a) => sum + a.amount, 0);
-      row.total = row.base + row.holiday + row.weekly + row.adjustment;
+      row.total =
+        row.base + row.holiday + row.night + row.weekly + row.adjustment;
       row.warnings = [...new Set(row.warnings)];
       return row;
     })

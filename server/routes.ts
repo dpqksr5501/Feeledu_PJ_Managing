@@ -14,6 +14,11 @@ import { attendanceWeek } from "./attendance.ts";
 import { overlappingShift, shiftRangeSql } from "./shift-query.ts";
 import { HolidayCalendarService } from "./holiday-calendar.ts";
 import { getHolidays } from "./holidays.ts";
+import {
+  attachShiftBreaks,
+  breakError,
+  replaceShiftBreaks,
+} from "./shift-breaks.ts";
 import { testDataPlan, removeTestData } from "./test-data.ts";
 import { addDays, dayStart, seoulDate } from "../shared/time.ts";
 import type {
@@ -107,6 +112,8 @@ const policySchema = z.object({
   weekStartsOn: z.number().int().min(0).max(6),
   holidayMultiplier: z.number().min(1).max(5),
   holidayWeekdays: z.array(z.number().int().min(0).max(6)).max(7),
+  nightEnabled: z.boolean().default(true),
+  nightPremiumRate: z.number().min(0.5).max(5).default(0.5),
   confirmed: z.literal(true),
 });
 const shiftSchema = z.object({
@@ -114,6 +121,10 @@ const shiftSchema = z.object({
   started_at: instant,
   ended_at: instant.nullable(),
   break_minutes: z.number().int().min(0).max(1440),
+  breaks: z
+    .array(z.object({ started_at: instant, ended_at: instant }))
+    .max(10)
+    .optional(),
   note: z.string().max(500),
   reason,
   revision: z.number().int().optional(),
@@ -702,13 +713,16 @@ export function registerRoutes(
   admin.get("/records", (req, res) => {
     const { from, to } = period.parse(req.query);
     res.json(
-      db
-        .prepare(shiftRangeSql(true))
-        .all(
-          new Date(dayStart(addDays(to, 1))).toISOString(),
-          new Date(dayStart(from)).toISOString(),
-          new Date(dayStart(addDays(to, 1))).toISOString(),
-        ),
+      attachShiftBreaks(
+        db,
+        db
+          .prepare(shiftRangeSql(true))
+          .all(
+            new Date(dayStart(addDays(to, 1))).toISOString(),
+            new Date(dayStart(from)).toISOString(),
+            new Date(dayStart(addDays(to, 1))).toISOString(),
+          ) as unknown as Shift[],
+      ),
     );
   });
   function validateShift(body: z.infer<typeof shiftSchema>, except = "") {
@@ -723,6 +737,13 @@ export function registerRoutes(
       fail(400, "미래 시각의 근무기록은 등록할 수 없습니다.");
     if (body.break_minutes * 60000 >= end - start)
       fail(400, "휴게시간이 전체 근무시간보다 짧아야 합니다.");
+    const invalidBreak = breakError(
+      body.started_at,
+      body.ended_at,
+      body.break_minutes,
+      body.breaks ?? [],
+    );
+    if (invalidBreak) fail(400, invalidBreak);
     const overlap = overlappingShift(
       db,
       body.employee_id,
@@ -752,6 +773,7 @@ export function registerRoutes(
         new Date().toISOString(),
       );
       audit(db, req.admin!.id, "shift.create", id, body);
+      replaceShiftBreaks(db, id, body.breaks ?? []);
     });
     res.status(201).json({ id });
   });
@@ -766,6 +788,9 @@ export function registerRoutes(
         fail(409, "다른 관리자가 기록을 변경했습니다. 새로고침해 주세요.");
       if (!one(db, "SELECT id FROM employees WHERE id=?", body.employee_id))
         fail(404, "직원을 찾을 수 없습니다.");
+      const savedBreaks = attachShiftBreaks(db, [before])[0].breaks!;
+      // An older open tab must not silently erase precise break information.
+      if (body.breaks === undefined) body.breaks = savedBreaks;
       validateShift(body, id);
       db.prepare(
         "UPDATE shifts SET employee_id=?,started_at=?,ended_at=?,break_minutes=?,note=?,revision=revision+1 WHERE id=?",
@@ -777,7 +802,11 @@ export function registerRoutes(
         body.note,
         id,
       );
-      audit(db, req.admin!.id, "shift.update", id, { before, after: body });
+      replaceShiftBreaks(db, id, body.breaks);
+      audit(db, req.admin!.id, "shift.update", id, {
+        before: { ...before, breaks: savedBreaks },
+        after: body,
+      });
     });
     res.json({ ok: true });
   });

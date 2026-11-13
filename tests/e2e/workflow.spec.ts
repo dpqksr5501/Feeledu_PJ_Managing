@@ -868,6 +868,56 @@ test("operator administration, paired tablet, offline reload and manager access"
   const corrected = await recorded();
   expect(corrected.started_at).toBe(precise.started_at);
   expect(corrected.ended_at).toBe(precise.ended_at);
+  await admin
+    .getByRole("row")
+    .filter({ hasText: "야간 검증" })
+    .getByRole("button", { name: "정정", exact: true })
+    .click();
+  dialog = admin.getByRole("dialog");
+  await dialog.getByLabel("실제 휴게 구간 입력", { exact: true }).check();
+  await dialog
+    .getByRole("button", { name: "휴게 구간 추가", exact: true })
+    .click();
+  await dialog
+    .getByLabel("휴게 1 시작", { exact: true })
+    .fill("2026-11-01T01:00:00");
+  await dialog
+    .getByLabel("휴게 1 종료", { exact: true })
+    .fill("2026-11-01T01:30:00");
+  await expect(
+    dialog.getByText("합계 30분 · 한국 시간 · 최대 10구간", { exact: true }),
+  ).toBeVisible();
+  await dialog.getByLabel("등록·정정 사유").fill("야간 실제 휴게 구간 확인");
+  await admin.screenshot({ path: ".tmp/qa-night-breaks.png", fullPage: true });
+  await dialog.getByRole("button", { name: "저장하기", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  expect((await recorded()).breaks).toEqual([
+    {
+      started_at: "2026-10-31T16:00:00.000Z",
+      ended_at: "2026-10-31T16:30:00.000Z",
+    },
+  ]);
+  await admin.getByRole("button", { name: "급여·수당", exact: true }).click();
+  const nightRow = admin.getByRole("row").filter({ hasText: "야간 검증" });
+  await expect(nightRow).toContainText("21,046원");
+  await nightRow
+    .getByRole("button", { name: "계산 내역", exact: true })
+    .click();
+  dialog = admin.getByRole("dialog");
+  await expect(
+    dialog.getByRole("columnheader", { name: "야간시간", exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("cell", { name: "21,046원", exact: true }),
+  ).toBeVisible();
+  await admin.screenshot({ path: ".tmp/qa-night-payroll.png", fullPage: true });
+  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+  const nightCsv = admin.waitForEvent("download");
+  await admin.getByRole("button", { name: "CSV 내보내기" }).click();
+  const csvContent = readFileSync((await (await nightCsv).path())!, "utf8");
+  expect(csvContent).toContain("야간시간");
+  expect(csvContent).toContain("야간가산");
+  expect(csvContent).toContain("21046");
   expect(errors).toEqual([]);
   await managerContext.close();
   await kioskContext.close();

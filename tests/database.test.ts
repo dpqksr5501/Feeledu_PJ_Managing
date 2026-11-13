@@ -108,7 +108,7 @@ test("migrates a version-1 employee without dropping data and can safely reopen 
           migrated
             .prepare("SELECT MAX(version) AS n FROM schema_version")
             .get()!.n,
-        ).toBe(4);
+        ).toBe(5);
         expect(
           migrated.prepare("PRAGMA integrity_check").get()!.integrity_check,
         ).toBe("ok");
@@ -125,7 +125,7 @@ test("refuses a future schema before modifying the database", () => {
   try {
     const future = new DatabaseSync(temporary.path);
     future.exec(
-      "CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(5); CREATE TABLE sentinel(value TEXT); INSERT INTO sentinel VALUES('보존할 원본');",
+      "CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(6); CREATE TABLE sentinel(value TEXT); INSERT INTO sentinel VALUES('보존할 원본');",
     );
     future.close();
     expect(() => openDb(temporary.path)).toThrow(/더 최신 앱 버전/);

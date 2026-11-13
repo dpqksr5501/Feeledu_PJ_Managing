@@ -20,6 +20,8 @@ export const defaultPolicy: Policy = {
   weekStartsOn: 1,
   holidayMultiplier: 1.5,
   holidayWeekdays: [],
+  nightEnabled: true,
+  nightPremiumRate: 0.5,
   confirmed: false,
 };
 export function initializeDb(db: Db) {
@@ -32,7 +34,7 @@ export function initializeDb(db: Db) {
     const version = db
       .prepare("SELECT MAX(version) AS n FROM schema_version")
       .get() as { n: number };
-    if (version.n > 4) {
+    if (version.n > 5) {
       db.close();
       throw new Error(
         "이 데이터베이스는 더 최신 앱 버전으로 생성됐습니다. 앱을 업데이트해 주세요.",
@@ -125,6 +127,13 @@ export function initializeDb(db: Db) {
     db.prepare("INSERT OR IGNORE INTO schema_version VALUES(4)").run();
   });
   // Additive indexes are safe to recreate when restoring an older backup.
+  transaction(db, () => {
+    db.exec(`CREATE TABLE IF NOT EXISTS shift_breaks (
+      shift_id TEXT NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+      started_at TEXT NOT NULL, ended_at TEXT NOT NULL,
+      PRIMARY KEY(shift_id,started_at), CHECK(ended_at>started_at));`);
+    db.prepare("INSERT OR IGNORE INTO schema_version VALUES(5)").run();
+  });
   // Only pending events enter this index; accepted history costs no index writes.
   db.exec(`
     CREATE INDEX IF NOT EXISTS shifts_end ON shifts(ended_at,started_at);
@@ -168,11 +177,14 @@ export function audit(
   );
 }
 export function getPolicy(db: Db): Policy {
-  return JSON.parse(
-    (
-      db.prepare("SELECT json FROM settings WHERE id=1").get() as {
-        json: string;
-      }
-    ).json,
-  );
+  return {
+    ...defaultPolicy,
+    ...JSON.parse(
+      (
+        db.prepare("SELECT json FROM settings WHERE id=1").get() as {
+          json: string;
+        }
+      ).json,
+    ),
+  };
 }

@@ -42,11 +42,13 @@ export type Shift = {
   started_at: string;
   ended_at: string | null;
   break_minutes: number;
+  breaks?: ShiftBreak[];
   source: string;
   note: string;
   revision: number;
   voided: number;
 };
+export type ShiftBreak = { started_at: string; ended_at: string };
 export type ClockEvent = {
   id: string;
   employee_id: string;
@@ -73,6 +75,8 @@ export type Policy = {
   weekStartsOn: number;
   holidayMultiplier: number;
   holidayWeekdays: number[];
+  nightEnabled: boolean;
+  nightPremiumRate: number;
   confirmed: boolean;
 };
 export type Holiday = {
@@ -115,6 +119,9 @@ export type PayrollRow = {
   seconds: number;
   base: number;
   holiday: number;
+  /** Optional only for immutable settlements created before night premiums. */
+  night?: number;
+  nightSeconds?: number;
   weekly: number;
   adjustment: number;
   total: number;
@@ -126,6 +133,8 @@ export type PayrollRow = {
     hourlyRate: number;
     base: number;
     holiday: number;
+    night?: number;
+    nightSeconds?: number;
     specialRate: boolean;
     holidayName: string;
   }[];

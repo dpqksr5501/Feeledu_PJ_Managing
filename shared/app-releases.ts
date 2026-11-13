@@ -13,6 +13,17 @@ export type AppRelease = {
 // Newest first. Keep IDs stable so skipped versions can be acknowledged together.
 export const appReleases: ReleaseNote[] = [
   {
+    id: "2026-11-14.2",
+    date: "2026-11-14",
+    title: "야간수당·실제 휴게 구간",
+    changes: [
+      "22:00~다음 날 06:00 실제 근로의 야간가산을 계산하고 휴일가산과 별도로 합산합니다.",
+      "날짜별 야간시간·수당을 계산 내역과 CSV에서 확인할 수 있습니다.",
+      "근무기록에 실제 휴게 구간을 입력해 날짜·시급·야간 경계를 정확하게 계산합니다.",
+      "휴게 합계만 있어 금액이 불명확한 기록은 정산 확정 전에 확인합니다. 기존 확정본은 유지됩니다.",
+    ],
+  },
+  {
     id: "2026-11-14.1",
     date: "2026-11-14",
     title: "관리자 로그인 유지",

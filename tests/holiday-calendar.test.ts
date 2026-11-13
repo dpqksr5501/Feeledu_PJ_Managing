@@ -345,7 +345,7 @@ test("API authorization and retroactive holiday/day-rate/weekend overlap preserv
   }
 });
 
-test("schema-4 calendar backups restore cached/pending data and old schema-3 backups remain valid", async () => {
+test("calendar backups restore cached/pending data and old schema-3 backups remain valid", async () => {
   const source = openDb(":memory:"),
     restored = openDb(":memory:"),
     legacyTarget = openDb(":memory:");

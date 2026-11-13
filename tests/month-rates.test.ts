@@ -76,7 +76,8 @@ test("monthly rates consolidate legacy mid-month changes, preserve later months/
       seconds: 21600,
       base: 92000,
       holiday: 20000,
-      total: 112000,
+      night: 46000,
+      total: 158000,
     });
     expect(
       f.db
@@ -91,7 +92,7 @@ test("monthly rates consolidate legacy mid-month changes, preserve later months/
     ).toBe(51000);
     expect((await monthly("2026-11", 14000)).status).toBe(200);
     const revised = calculatePayroll(f.db, before.from, before.to);
-    expect(revised.difference).toBe(4000);
+    expect(revised.difference).toBe(6000);
     expect(revised.settlement?.snapshot.total).toBe(before.total);
     for (const month of [
       "2026-00",

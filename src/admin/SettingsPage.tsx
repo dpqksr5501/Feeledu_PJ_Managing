@@ -655,6 +655,53 @@ function PolicyForm({ initial }: { initial: Policy }) {
             </p>
           </Help>
         </div>
+        <div className="form-section">
+          <h3>야간근로 · 22:00~다음 날 06:00</h3>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={value.nightEnabled}
+              onChange={(e) =>
+                setValue({ ...value, nightEnabled: e.target.checked })
+              }
+            />
+            야간수당 계산 사용
+          </label>
+          <Field label="야간 추가 가산 (%)">
+            <input
+              type="number"
+              min="50"
+              max="500"
+              step="5"
+              required
+              value={Math.round(value.nightPremiumRate * 100)}
+              onChange={(event) =>
+                setValue({
+                  ...value,
+                  nightPremiumRate: Number(event.target.value) / 100,
+                })
+              }
+            />
+          </Field>
+          <p className="small muted">
+            실제 야간 근로 × 해당 날짜 시급 ×{" "}
+            {Math.round(value.nightPremiumRate * 100)}% · 휴일가산과 별도 합산
+          </p>
+          <Help title="야간수당 기준·근거">
+            <p className="small muted">
+              등록된 월·하루 시급을 야간 가산 기준 시급으로 사용합니다. 고정수당
+              등으로 통상시급이 다르면 지급 전 확인이 필요합니다. 학원 지급
+              정책으로 적용하며 직원 수로 자동 제외하지 않습니다.{" "}
+              <a
+                href="https://1350.moel.go.kr/rtmview.do?id=1000320245"
+                target="_blank"
+                rel="noreferrer"
+              >
+                고용노동부 제56조 안내
+              </a>
+            </p>
+          </Help>
+        </div>
         <Alert>
           변경 시 과거 예상 급여도 재계산됩니다. 기존 확정본은 유지됩니다.
         </Alert>

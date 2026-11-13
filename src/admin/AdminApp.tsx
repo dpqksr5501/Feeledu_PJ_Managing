@@ -253,6 +253,8 @@ export default function AdminApp({
         "근무시간",
         "기본급",
         "휴일가산",
+        "야간시간",
+        "야간가산",
         "주휴수당",
         "기타수당·조정",
         "계산합계",
@@ -266,6 +268,8 @@ export default function AdminApp({
         r.seconds / 3600,
         r.base,
         r.holiday,
+        (r.nightSeconds ?? 0) / 3600,
+        r.night ?? 0,
         r.weekly,
         r.adjustment,
         r.total,
@@ -290,6 +294,8 @@ export default function AdminApp({
           <b>{money(row.base)}</b>
           <span>휴일 추가 가산</span>
           <b>{money(row.holiday)}</b>
+          <span>야간 추가 가산 · {hours(row.nightSeconds ?? 0)}</span>
+          <b>{money(row.night ?? 0)}</b>
           <span>주휴수당</span>
           <b>{money(row.weekly)}</b>
           <span>기타 수당·조정</span>
@@ -322,6 +328,8 @@ export default function AdminApp({
                   <th>시급</th>
                   <th>기본급</th>
                   <th>휴일가산</th>
+                  <th>야간시간</th>
+                  <th>야간가산</th>
                 </tr>
               </thead>
               <tbody>
@@ -342,6 +350,8 @@ export default function AdminApp({
                     </td>
                     <td>{money(Math.round(day.base))}</td>
                     <td>{money(Math.round(day.holiday))}</td>
+                    <td>{hours(day.nightSeconds ?? 0)}</td>
+                    <td>{money(Math.round(day.night ?? 0))}</td>
                   </tr>
                 ))}
               </tbody>
@@ -356,8 +366,10 @@ export default function AdminApp({
         ))}
         <Help title="계산 기준">
           <p className="small muted">
-            기본급·휴일가산·주휴수당을 각각 합산한 뒤 원 단위 반올림합니다. 세전
-            금액이며 세금·보험 공제와 실제 지급은 포함하지 않습니다.
+            기본급·휴일가산·야간가산·주휴수당을 각각 합산한 뒤 원 단위
+            반올림합니다. 야간은 22:00~06:00 실제 근로만 계산하며 휴일가산과
+            더합니다. 세전 금액이며 세금·보험 공제와 실제 지급은 포함하지
+            않습니다.
           </p>
         </Help>
       </div>,
@@ -379,6 +391,7 @@ export default function AdminApp({
                   <th>직원</th>
                   <th>기본급</th>
                   <th>휴일</th>
+                  <th>야간</th>
                   <th>주휴</th>
                   <th>기타</th>
                   <th>확정 합계</th>
@@ -390,6 +403,7 @@ export default function AdminApp({
                     <td>{r.name}</td>
                     <td>{money(r.base)}</td>
                     <td>{money(r.holiday)}</td>
+                    <td>{money(r.night ?? 0)}</td>
                     <td>{money(r.weekly)}</td>
                     <td>{money(r.adjustment)}</td>
                     <td>{money(r.total)}</td>
@@ -486,7 +500,12 @@ export default function AdminApp({
                 </td>
                 {!compact && (
                   <>
-                    <td>{s.break_minutes}분</td>
+                    <td>
+                      {s.break_minutes}분
+                      {!!s.breaks?.length && (
+                        <small className="cell-note">구간 입력</small>
+                      )}
+                    </td>
                     <td>
                       {s.ended_at
                         ? hours(
@@ -1004,6 +1023,7 @@ export default function AdminApp({
                             <th>근무시간</th>
                             <th>기본급</th>
                             <th>휴일가산</th>
+                            <th>야간가산</th>
                             <th>주휴수당</th>
                             <th>기타·조정</th>
                             <th>합계</th>
@@ -1024,6 +1044,12 @@ export default function AdminApp({
                               <td>{hours(r.seconds)}</td>
                               <td>{money(r.base)}</td>
                               <td>{money(r.holiday)}</td>
+                              <td>
+                                {money(r.night ?? 0)}
+                                <small className="cell-note">
+                                  {hours(r.nightSeconds ?? 0)}
+                                </small>
+                              </td>
                               <td>{money(r.weekly)}</td>
                               <td>{money(r.adjustment)}</td>
                               <td>

@@ -4,6 +4,7 @@ import { addDays, dayStart, seoulDate, weekStart } from "../shared/time.ts";
 import { paidMillisecondsInRange } from "../shared/shift-duration.ts";
 import { holidayName } from "../shared/workdays.ts";
 import { getHolidays } from "./holidays.ts";
+import { attachShiftBreaks } from "./shift-breaks.ts";
 import type {
   AttendanceDay,
   Employee,
@@ -35,13 +36,16 @@ export function attendanceWeek(
         segments: [],
       };
     });
-  const shifts = db
-    .prepare(shiftRangeSql())
-    .all(
-      new Date(finish).toISOString(),
-      new Date(begin).toISOString(),
-      new Date(finish).toISOString(),
-    ) as unknown as Shift[];
+  const shifts = attachShiftBreaks(
+    db,
+    db
+      .prepare(shiftRangeSql())
+      .all(
+        new Date(finish).toISOString(),
+        new Date(begin).toISOString(),
+        new Date(finish).toISOString(),
+      ) as unknown as Shift[],
+  );
   const pending = db
     .prepare(
       "SELECT employee_id,COUNT(*) AS n FROM clock_events WHERE status='pending' AND captured_at>=? AND captured_at<? GROUP BY employee_id",

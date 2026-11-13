@@ -2,6 +2,8 @@
 
 Scope: repository and isolated Node/Cloudflare tests. No brute-force attempts or test personnel records were written to production. This is a focused application review, not a certification or exhaustive penetration test.
 
+2026-11-14 night-premium follow-up: precise break intervals use bounded authenticated record APIs, normalized UTC timestamps, existing optimistic revisions and atomic audit writes. The server rejects overlapping/out-of-shift intervals and inconsistent totals; older clients cannot implicitly erase intervals. Schema-5 snapshots include break intervals, restore foreign keys and validate interval consistency inside the import transaction. Schema-3/4 restores remain supported; original settlement JSON is not rewritten. Indexed batch break reads avoid per-employee queries. See [night calculation scope and official sources](NIGHT_SHIFTS.md).
+
 ## Remediated
 
 - Cloudflare static HTML bypassed Express Helmet. Static asset headers now apply CSP, anti-framing, MIME sniff prevention, referrer/permissions restrictions and HTTPS HSTS.

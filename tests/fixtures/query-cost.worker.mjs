@@ -6,6 +6,7 @@ import { attendanceWeek } from "../../server/attendance.ts";
 import { calculatePayroll } from "../../server/payroll.ts";
 import { overlappingShift, shiftRangeSql } from "../../server/shift-query.ts";
 import { HolidayCalendarService } from "../../server/holiday-calendar.ts";
+import { attachShiftBreaks } from "../../server/shift-breaks.ts";
 
 export class QueryBenchmark extends DurableObject {
   async fetch() {
@@ -112,13 +113,16 @@ export class QueryBenchmark extends DurableObject {
           calculatePayroll(measuredDb, "2026-11-01", "2026-11-30"),
         ),
         records: run(() =>
-          measuredDb
-            .prepare(shiftRangeSql(true))
-            .all(
-              "2026-12-01T00:00:00.000Z",
-              "2026-11-01T00:00:00.000Z",
-              "2026-12-01T00:00:00.000Z",
-            ),
+          attachShiftBreaks(
+            measuredDb,
+            measuredDb
+              .prepare(shiftRangeSql(true))
+              .all(
+                "2026-12-01T00:00:00.000Z",
+                "2026-11-01T00:00:00.000Z",
+                "2026-12-01T00:00:00.000Z",
+              ),
+          ),
         ),
         reviews: run(() =>
           measuredDb

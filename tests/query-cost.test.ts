@@ -52,7 +52,10 @@ test("ten years of history keeps indexed Cloudflare row reads bounded and result
   );
   try {
     const response = await mf.dispatchFetch("http://localhost/benchmark");
-    expect(response.status).toBe(200);
+    expect(
+      response.status,
+      response.ok ? undefined : await response.clone().text(),
+    ).toBe(200);
     const result = (await response.json()) as {
       equivalent: boolean;
       calendarSynced: boolean;
