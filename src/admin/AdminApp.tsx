@@ -563,7 +563,7 @@ export default function AdminApp({
           target={admin.shared_tablet ? undefined : "_blank"}
           rel="noreferrer"
           onClick={(event) => {
-            if (!admin.shared_tablet) return;
+            if (!admin.shared_tablet || admin.persistent_login) return;
             event.preventDefault();
             void logout()
               .then(() => {

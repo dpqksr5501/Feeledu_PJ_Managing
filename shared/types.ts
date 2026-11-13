@@ -6,6 +6,7 @@ export type Admin = {
   role: Role;
   active: number;
   shared_tablet?: number;
+  persistent_login?: number;
 };
 export type Employee = {
   id: string;

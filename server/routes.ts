@@ -36,6 +36,8 @@ import {
   PC_IDLE_MS,
   TABLET_IDLE_MS,
   SESSION_MAX_MS,
+  PERSISTENT_DEADLINE,
+  PERSISTENT_COOKIE_MS,
 } from "./auth-state.ts";
 export type Security = {
   hash(value: string): string;
@@ -168,6 +170,15 @@ export function registerRoutes(
   const holidayCalendar =
     calendar ?? new HolidayCalendarService(db, () => undefined);
   const dummyPasswordHash = passwordHash(secret());
+  function sessionCookie(res: Response, token: string, persistent: boolean) {
+    res.cookie("feeledu_session", token, {
+      httpOnly: true,
+      secure: secureCookie,
+      sameSite: "strict",
+      maxAge: persistent ? PERSISTENT_COOKIE_MS : SESSION_MAX_MS,
+      path: "/",
+    });
+  }
   function checkBackoff(res: Response, key: string) {
     const seconds = authBackoff(db, key);
     if (seconds) {
@@ -175,7 +186,7 @@ export function registerRoutes(
       fail(429, "잠시 후 다시 시도해 주세요.");
     }
   }
-  const requireAdmin = (req: Authed, _res: Response, next: NextFunction) => {
+  const requireAdmin = (req: Authed, res: Response, next: NextFunction) => {
     const token = req.headers.cookie
       ?.split(";")
       .map((s) => s.trim())
@@ -213,7 +224,18 @@ export function registerRoutes(
         req.sessionHash,
       );
     }
-    req.admin = admin;
+    const persistent = absolute_deadline === PERSISTENT_DEADLINE;
+    req.admin = { ...admin, persistent_login: Number(persistent) };
+    if (
+      persistent &&
+      Date.parse(session_expiry) <= Date.now() + PERSISTENT_COOKIE_MS - 86400000
+    ) {
+      db.prepare("UPDATE sessions SET expires_at=? WHERE token_hash=?").run(
+        new Date(Date.now() + PERSISTENT_COOKIE_MS).toISOString(),
+        req.sessionHash,
+      );
+      sessionCookie(res, token!, true);
+    }
     next();
   };
   const owner = (req: Authed, _res: Response, next: NextFunction) => {
@@ -248,7 +270,12 @@ export function registerRoutes(
       );
     next();
   };
-  function login(res: Response, adminId: string, sharedTablet = false) {
+  function login(
+    res: Response,
+    adminId: string,
+    sharedTablet = false,
+    persistent = false,
+  ) {
     const token = secret();
     db.prepare("DELETE FROM sessions WHERE expires_at<?").run(
       new Date().toISOString(),
@@ -258,22 +285,20 @@ export function registerRoutes(
     ).run(
       hash(token),
       adminId,
-      new Date(
-        Date.now() + (sharedTablet ? TABLET_IDLE_MS : PC_IDLE_MS),
-      ).toISOString(),
+      persistent
+        ? new Date(Date.now() + PERSISTENT_COOKIE_MS).toISOString()
+        : new Date(
+            Date.now() + (sharedTablet ? TABLET_IDLE_MS : PC_IDLE_MS),
+          ).toISOString(),
       Number(sharedTablet),
     );
     db.prepare("INSERT INTO session_deadlines VALUES(?,?)").run(
       hash(token),
-      new Date(Date.now() + SESSION_MAX_MS).toISOString(),
+      persistent
+        ? PERSISTENT_DEADLINE
+        : new Date(Date.now() + SESSION_MAX_MS).toISOString(),
     );
-    res.cookie("feeledu_session", token, {
-      httpOnly: true,
-      secure: secureCookie,
-      sameSite: "strict",
-      maxAge: 12 * 3600000,
-      path: "/",
-    });
+    sessionCookie(res, token, persistent);
   }
   app.get("/api/health", (_req, res) =>
     res.json({ ok: true, time: new Date().toISOString() }),
@@ -288,6 +313,7 @@ export function registerRoutes(
       .extend({
         token: z.string().max(200),
         sharedTablet: z.boolean().optional().default(false),
+        keepSignedIn: z.boolean().optional().default(false),
       })
       .parse(req.body);
     if (!secureEqual(body.token, setupToken))
@@ -305,7 +331,7 @@ export function registerRoutes(
       );
       audit(db, id, "setup", id, { username: body.username });
     });
-    login(res, id, body.sharedTablet);
+    login(res, id, body.sharedTablet, body.keepSignedIn);
     res.status(201).json({ ok: true });
   });
   app.post("/api/login", sensitiveLimit, (req, res) => {
@@ -314,6 +340,7 @@ export function registerRoutes(
         username: z.string().max(40),
         password: z.string().max(128),
         sharedTablet: z.boolean().optional().default(false),
+        keepSignedIn: z.boolean().optional().default(false),
       })
       .parse(req.body);
     const attemptKey = hash("login:" + body.username);
@@ -337,7 +364,7 @@ export function registerRoutes(
         passwordHash(body.password),
         admin.id,
       );
-    login(res, admin.id, body.sharedTablet);
+    login(res, admin.id, body.sharedTablet, body.keepSignedIn);
     audit(db, admin.id, "login", admin.id, {});
     res.json({ ok: true });
   });
@@ -355,12 +382,34 @@ export function registerRoutes(
   const admin = router();
   app.use("/api/admin", requireAdmin, admin);
   admin.get("/me", (req: Authed, res) => res.json(req.admin));
+  admin.post("/session/keep", (req: Authed, res) => {
+    transaction(db, () => {
+      db.prepare("UPDATE sessions SET expires_at=? WHERE token_hash=?").run(
+        new Date(Date.now() + PERSISTENT_COOKIE_MS).toISOString(),
+        req.sessionHash!,
+      );
+      db.prepare(
+        "INSERT INTO session_deadlines VALUES(?,?) ON CONFLICT(token_hash) DO UPDATE SET absolute_expires_at=excluded.absolute_expires_at",
+      ).run(req.sessionHash!, PERSISTENT_DEADLINE);
+    });
+    const token = req.headers
+      .cookie!.split(";")
+      .map((value) => value.trim())
+      .find((value) => value.startsWith("feeledu_session="))!
+      .slice("feeledu_session=".length);
+    sessionCookie(res, token, true);
+    res.json({ ...req.admin, persistent_login: 1 });
+  });
   admin.get("/attendance-week", (req, res) => {
     const anchor =
       req.query.date === undefined ? seoulDate() : date.parse(req.query.date);
     res.json(attendanceWeek(db, anchor));
   });
   admin.post("/activity", (req: Authed, res) => {
+    if (req.admin!.persistent_login) {
+      res.json({ ok: true });
+      return;
+    }
     db.prepare("UPDATE sessions SET expires_at=? WHERE token_hash=?").run(
       new Date(
         Math.min(
@@ -399,7 +448,12 @@ export function registerRoutes(
       db.prepare("DELETE FROM sessions WHERE admin_id=?").run(req.admin!.id);
       audit(db, req.admin!.id, "password.change", req.admin!.id, {});
     });
-    login(res, req.admin!.id, !!req.admin!.shared_tablet);
+    login(
+      res,
+      req.admin!.id,
+      !!req.admin!.shared_tablet,
+      !!req.admin!.persistent_login,
+    );
     res.json({ ok: true });
   });
   admin.get("/employees", (_req, res) =>

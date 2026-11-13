@@ -6,6 +6,8 @@ import {
 export const PC_IDLE_MS = ADMIN_IDLE_MS;
 export const TABLET_IDLE_MS = ADMIN_IDLE_MS;
 export const SESSION_MAX_MS = ADMIN_SESSION_MAX_MS;
+export const PERSISTENT_DEADLINE = "9999-12-31T23:59:59.999Z";
+export const PERSISTENT_COOKIE_MS = 7 * 86400000;
 const WINDOW_MS = 15 * 60000;
 export function initializeAuthState(db: Db) {
   // Operational state is deliberately excluded from business data snapshots.

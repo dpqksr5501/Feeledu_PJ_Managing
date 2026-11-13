@@ -24,7 +24,8 @@ function Auth({ setup, done }: { setup: boolean; done: () => void }) {
     try {
       await send(setup ? "/setup" : "/login", {
         ...Object.fromEntries(form),
-        sharedTablet: form.has("sharedTablet"),
+        sharedTablet: matchMedia("(pointer: coarse)").matches,
+        keepSignedIn: true,
       });
       done();
     } catch (err) {
@@ -82,14 +83,6 @@ function Auth({ setup, done }: { setup: boolean; done: () => void }) {
               />
             </Field>
             {error && <Alert kind="error">{error}</Alert>}
-            <label className="checkbox-row">
-              <input
-                name="sharedTablet"
-                type="checkbox"
-                defaultChecked={matchMedia("(pointer: coarse)").matches}
-              />
-              공용 태블릿 · 화면을 떠나면 로그아웃
-            </label>
             <button className="button primary full" disabled={busy}>
               {busy ? "확인 중…" : setup ? "운영자 계정 만들기" : "로그인"}
               <ArrowRight size={18} />
@@ -114,8 +107,15 @@ export default function App() {
     try {
       const result = await api<{ needsSetup: boolean }>("/bootstrap");
       setSetup(result.needsSetup);
-      if (!result.needsSetup)
-        setAdmin(await api<Admin>("/admin/me").catch(() => null));
+      if (!result.needsSetup) {
+        let current = await api<Admin>("/admin/me").catch(() => null);
+        if (current && !current.persistent_login)
+          current = await api<Admin>("/admin/session/keep", {
+            method: "POST",
+            body: "{}",
+          });
+        setAdmin(current);
+      }
     } catch {
       setError("서버에 연결할 수 없습니다. 서버 실행 상태를 확인해 주세요.");
     } finally {
@@ -131,6 +131,39 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!admin) return;
+    if (admin.persistent_login) {
+      let alive = true,
+        lastCheck = Date.now(),
+        lastAttempt = 0;
+      const check = () => {
+        if (
+          document.hidden ||
+          !navigator.onLine ||
+          Date.now() - lastCheck < 86400000 ||
+          Date.now() - lastAttempt < 300000
+        )
+          return;
+        lastAttempt = Date.now();
+        void api<Admin>("/admin/me")
+          .then(() => {
+            lastCheck = Date.now();
+          })
+          .catch((error: unknown) => {
+            if (alive && error instanceof ApiError && error.status === 401)
+              setAdmin(null);
+          });
+      };
+      // Keep a continuously open, otherwise static administration screen alive.
+      const timer = setInterval(check, 86400000);
+      window.addEventListener("online", check);
+      document.addEventListener("visibilitychange", check);
+      return () => {
+        alive = false;
+        clearInterval(timer);
+        window.removeEventListener("online", check);
+        document.removeEventListener("visibilitychange", check);
+      };
+    }
     let timer: ReturnType<typeof setTimeout>;
     let lastPing = 0;
     let alive = true;

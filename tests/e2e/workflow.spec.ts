@@ -545,9 +545,7 @@ test("operator administration, paired tablet, offline reload and manager access"
   await tabletAdmin
     .getByLabel("비밀번호", { exact: true })
     .fill("qa-manager-password-123");
-  await expect(
-    tabletAdmin.getByRole("checkbox", { name: /공용 태블릿/ }),
-  ).toBeChecked();
+  await expect(tabletAdmin.getByRole("checkbox")).toHaveCount(0);
   await tabletAdmin
     .getByRole("button", { name: "로그인", exact: true })
     .click();
@@ -579,6 +577,34 @@ test("operator administration, paired tablet, offline reload and manager access"
     tabletAdmin.getByRole("heading", { name: "근무기록", exact: true }),
   ).toBeVisible();
   await tabletAdmin.clock.fastForward(30 * 60000);
+  await tabletAdmin.bringToFront();
+  const retainedCheck = tabletAdmin.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/admin/me" &&
+      response.request().method() === "GET",
+  );
+  await tabletAdmin.clock.fastForward(25 * 3600000);
+  expect((await retainedCheck).status()).toBe(200);
+  await expect(
+    tabletAdmin.getByRole("heading", { name: "근무기록", exact: true }),
+  ).toBeVisible();
+  await tabletAdmin.evaluate(() => {
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect(
+    tabletAdmin.getByRole("heading", { name: "근무기록", exact: true }),
+  ).toBeVisible();
+  await tabletAdmin.evaluate(() => {
+    Reflect.deleteProperty(document, "hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await tabletAdmin
+    .getByRole("button", { name: "로그아웃", exact: true })
+    .click();
   await expect(
     tabletAdmin.getByRole("heading", { name: "관리자 로그인", exact: true }),
   ).toBeVisible();

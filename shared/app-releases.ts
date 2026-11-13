@@ -13,6 +13,16 @@ export type AppRelease = {
 // Newest first. Keep IDs stable so skipped versions can be acknowledged together.
 export const appReleases: ReleaseNote[] = [
   {
+    id: "2026-11-14.1",
+    date: "2026-11-14",
+    title: "관리자 로그인 유지",
+    changes: [
+      "관리자 화면의 미사용·백그라운드·12시간 자동 잠금을 해제했습니다.",
+      "로그인은 7일 동안 유지되며 사용 중 자동으로 연장됩니다.",
+      "직접 로그아웃하거나 계정을 해제하면 접속을 종료합니다.",
+    ],
+  },
+  {
     id: "2026-11-13.3",
     date: "2026-11-13",
     title: "야간 근무·월 시급",
