@@ -45,6 +45,7 @@ export default function Kiosk() {
   const [message, setMessage] = useState<KioskNotice | null>(null);
   const [busy, setBusy] = useState(false);
   const flushing = useRef(false);
+  const lastRosterRead = useRef(0);
   const retry = useRef(new SyncRetry());
   const update = useAppUpdate();
   const lastActivity = useRef(Date.now());
@@ -89,6 +90,7 @@ export default function Kiosk() {
     });
     setRoster(data);
     await kioskStore.set("roster", data);
+    lastRosterRead.current = Date.now();
     setOnline(true);
   }, [token]);
   const flush = useCallback(async () => {
@@ -104,7 +106,19 @@ export default function Kiosk() {
       try {
         const queue = await kioskStore.queue();
         setPending(queue.length);
+        const deferredEmployees = new Set<string>();
+        let deferred = false,
+          attempted = false;
         for (const item of queue) {
+          if (
+            (item.retry_after ?? 0) > Date.now() ||
+            deferredEmployees.has(item.employee_id)
+          ) {
+            deferredEmployees.add(item.employee_id);
+            deferred = true;
+            continue;
+          }
+          attempted = true;
           try {
             const result = await api<{ status: string; review_reason: string }>(
               "/kiosk/events",
@@ -129,6 +143,14 @@ export default function Kiosk() {
                   : `관리자 확인 대기 · ${result.review_reason}`,
             });
           } catch (err) {
+            if (err instanceof ApiError && err.status === 404) {
+              // Keep an orphaned event for recovery, but do not let it block
+              // unrelated employees. Preserve per-employee event ordering.
+              await kioskStore.deferUnknownEmployee(item.id);
+              deferredEmployees.add(item.employee_id);
+              deferred = true;
+              continue;
+            }
             retry.current.fail(err);
             if (err instanceof ApiError) {
               setError(err.message);
@@ -140,8 +162,13 @@ export default function Kiosk() {
             return;
           }
         }
-        await refreshRoster();
-        setError("");
+        if (attempted || Date.now() - lastRosterRead.current >= 60000)
+          await refreshRoster();
+        setError(
+          deferred
+            ? "직원 정보 확인이 필요한 미전송 기록이 있습니다. ‘기록 보관’ 후 관리자에게 확인해 주세요."
+            : "",
+        );
         retry.current.success();
       } catch (err) {
         retry.current.fail(err);

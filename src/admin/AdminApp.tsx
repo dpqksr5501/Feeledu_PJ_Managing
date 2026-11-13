@@ -33,6 +33,7 @@ import {
   AdjustmentForm,
   EmployeeForm,
   RateForm,
+  DayRateForm,
   ReviewForm,
   SettlementForm,
   ShiftForm,
@@ -57,6 +58,7 @@ const actionLabels: Record<string, string> = {
   "employee.create": "직원 등록",
   "employee.update": "직원 수정",
   "rate.update": "시급 변경",
+  "rate.month": "월 시급 변경",
   "dayrate.update": "하루 시급 변경",
   "dayrate.remove": "하루 시급 해제",
   "shift.create": "근무 등록",
@@ -81,6 +83,7 @@ const actionLabels: Record<string, string> = {
   "device.paired": "태블릿 연결",
   "device.revoke": "태블릿 연결 해제",
   "backup.download": "백업 다운로드",
+  "testdata.cleanup": "테스트 데이터 정리",
 };
 export default function AdminApp({
   admin,
@@ -796,7 +799,7 @@ export default function AdminApp({
                         className="button primary"
                         onClick={() => open("근무기록 추가", <ShiftForm />)}
                       >
-                        <Plus size={17} /> 기록 추가
+                        <Plus size={17} /> 출퇴근 직접 입력
                       </button>
                     </div>
                   </div>
@@ -902,12 +905,23 @@ export default function AdminApp({
                                     className="text-button"
                                     onClick={() =>
                                       open(
-                                        `${e.name} · 시급 이력`,
+                                        `${e.name} · 월 시급`,
                                         <RateForm employee={e} />,
                                       )
                                     }
                                   >
-                                    시급 이력
+                                    월 시급
+                                  </button>
+                                  <button
+                                    className="text-button"
+                                    onClick={() =>
+                                      open(
+                                        `${e.name} · 하루 시급`,
+                                        <DayRateForm employee={e} />,
+                                      )
+                                    }
+                                  >
+                                    하루 시급
                                   </button>
                                 </div>
                               </td>

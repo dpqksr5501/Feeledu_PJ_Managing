@@ -10,13 +10,12 @@ import type {
   Shift,
   ReviewEvent,
 } from "../../shared/types.ts";
-import { seoulDate, money } from "../../shared/time.ts";
+import { seoulDate, money, hours } from "../../shared/time.ts";
 import { Alert, Field, Help } from "../ui.tsx";
 import { useAdmin } from "./context.tsx";
-export const localDateTime = (value: string) =>
-  new Date(Date.parse(value) + 9 * 3600000).toISOString().slice(0, 16);
-const toInstant = (value: string) =>
-  value ? new Date(value + ":00+09:00").toISOString() : null;
+import { localDateTime, toShiftInstant } from "./shift-form-time.ts";
+import { rateMonthVersion } from "../../shared/rate-month.ts";
+export { localDateTime } from "./shift-form-time.ts";
 
 export function ActionForm({
   children,
@@ -82,7 +81,7 @@ export function EmployeeForm({ employee }: { employee?: Employee }) {
             ...(!employee
               ? {
                   hourly_rate: Number(form.get("hourly_rate")),
-                  effective_from: form.get("effective_from"),
+                  effective_from: form.get("effective_month") + "-01",
                 }
               : {}),
           },
@@ -131,11 +130,11 @@ export function EmployeeForm({ employee }: { employee?: Employee }) {
               placeholder="예: 12000"
             />
           </Field>
-          <Field label="시급 적용 시작일">
+          <Field label="최초 시급 적용 월">
             <input
-              name="effective_from"
-              type="date"
-              defaultValue={seoulDate()}
+              name="effective_month"
+              type="month"
+              defaultValue={seoulDate().slice(0, 7)}
               required
             />
           </Field>
@@ -179,8 +178,8 @@ export function EmployeeForm({ employee }: { employee?: Employee }) {
       {employee && (
         <Help title="시급·퇴사 안내">
           <p className="muted small">
-            시급은 직원 목록의 ‘시급 이력’에서 적용 시작일과 사유를 지정해
-            변경하세요. 퇴사 처리해도 과거 기록은 보존됩니다.
+            ‘월 시급’에서 적용 월과 사유를 지정해 변경합니다. 하루 예외는 ‘하루
+            시급’에서 관리합니다. 퇴사 처리해도 과거 기록은 보존됩니다.
           </p>
         </Help>
       )}
@@ -188,13 +187,30 @@ export function EmployeeForm({ employee }: { employee?: Employee }) {
   );
 }
 export function RateForm({ employee }: { employee: Employee }) {
+  return <RateEditor employee={employee} isDay={false} />;
+}
+export function DayRateForm({ employee }: { employee: Employee }) {
+  return <RateEditor employee={employee} isDay />;
+}
+function RateEditor({
+  employee,
+  isDay,
+}: {
+  employee: Employee;
+  isDay: boolean;
+}) {
   const { mutate, close } = useAdmin();
-  const [effective, setEffective] = useState(seoulDate());
-  const [scope, setScope] = useState("from");
-  const existing =
-    scope === "day"
-      ? employee.day_rates?.find((r) => r.date === effective)
-      : employee.rates?.find((r) => r.effective_from === effective);
+  const [selection, setSelection] = useState(
+    isDay ? seoulDate() : seoulDate().slice(0, 7),
+  );
+  const effective = isDay ? selection : selection + "-01";
+  const monthRates = (employee.rates ?? [])
+    .filter((rate) => rate.effective_from.startsWith(selection + "-"))
+    .sort((a, b) => b.effective_from.localeCompare(a.effective_from));
+  const existing = isDay
+    ? employee.day_rates?.find((r) => r.date === effective)
+    : (monthRates.find((rate) => rate.effective_from === effective) ??
+      monthRates[0]);
   const baseRate = employee.rates
     ?.filter((r) => r.effective_from <= effective)
     .sort((a, b) => a.effective_from.localeCompare(b.effective_from))
@@ -203,34 +219,34 @@ export function RateForm({ employee }: { employee: Employee }) {
     <ActionForm
       submit={(form) =>
         mutate(
-          `/admin/employees/${employee.id}/${scope === "day" ? "day-rates" : "rates"}`,
+          `/admin/employees/${employee.id}/${isDay ? "day-rates" : "month-rates"}`,
           {
-            ...(scope === "day"
-              ? { date: effective }
-              : { effective_from: effective }),
+            ...(isDay
+              ? { date: effective, expectedRate: existing?.hourly_rate ?? null }
+              : {
+                  month: selection,
+                  expected: rateMonthVersion(employee.rates ?? [], selection),
+                }),
             hourly_rate: Number(form.get("hourly_rate")),
             reason: form.get("reason"),
-            expectedRate: existing?.hourly_rate ?? null,
           },
         )
       }
     >
-      <Field label="적용 범위">
-        <select
-          value={scope}
-          onChange={(event) => setScope(event.target.value)}
-        >
-          <option value="from">이 날짜부터 계속</option>
-          <option value="day">이 날짜 하루만</option>
-        </select>
-      </Field>
       <Alert>
-        {scope === "day"
+        {isDay
           ? "선택한 하루만 적용 · 다음 날은 기본 시급"
-          : "적용일부터 재계산"}{" "}
+          : "선택 월 1일부터 다음 시급 변경 전까지 적용 · 하루 시급 우선"}{" "}
         · 기존 확정본 유지
       </Alert>
-      {scope === "day" && (
+      {!isDay &&
+        monthRates.some((rate) => !rate.effective_from.endsWith("-01")) && (
+          <Alert>
+            이달의 기존 기본 시급 {monthRates.length}건을 월 시급 하나로
+            통합합니다. 하루 시급은 유지됩니다.
+          </Alert>
+        )}
+      {isDay && (
         <Help title="하루 시급 계산">
           <p className="small muted">
             선택한 날짜의 기본 시급을 바꿉니다. 휴일 배율과 주휴 계산에도 이
@@ -239,17 +255,25 @@ export function RateForm({ employee }: { employee: Employee }) {
         </Help>
       )}
       <div className="form-grid">
-        <Field label={scope === "day" ? "적용 날짜" : "적용 시작일"}>
+        <Field label={isDay ? "적용 날짜" : "적용 월"}>
           <input
-            type="date"
+            type={isDay ? "date" : "month"}
             required
-            value={effective}
-            onChange={(e) => setEffective(e.target.value)}
+            value={selection}
+            onChange={(e) => setSelection(e.target.value)}
           />
         </Field>
-        <Field label={existing ? "해당 일자 시급 정정 (원)" : "새 시급 (원)"}>
+        <Field
+          label={
+            !isDay
+              ? "월 시급 (원)"
+              : existing
+                ? "해당 일자 시급 정정 (원)"
+                : "새 시급 (원)"
+          }
+        >
           <input
-            key={scope + effective}
+            key={String(isDay) + effective}
             name="hourly_rate"
             type="number"
             min="1"
@@ -269,7 +293,7 @@ export function RateForm({ employee }: { employee: Employee }) {
           placeholder="예: 11월 1일자 시급 인상 소급 적용"
         />
       </Field>
-      {scope === "day" && existing && (
+      {isDay && existing && (
         <button
           type="button"
           className="button secondary danger"
@@ -297,43 +321,81 @@ export function RateForm({ employee }: { employee: Employee }) {
       )}
       <div className="rate-history">
         <strong>적용 이력</strong>
-        {employee.rates?.map((rate) => (
-          <div key={rate.id}>
-            <span>{rate.effective_from}부터</span>
-            <b>{money(rate.hourly_rate)}</b>
-            <small>{rate.reason}</small>
-          </div>
-        ))}
-        {employee.day_rates?.map((rate) => (
-          <div key={rate.id}>
-            <span>{rate.date} 하루만</span>
-            <b>{money(rate.hourly_rate)}</b>
-            <small>{rate.reason}</small>
-          </div>
-        ))}
+        {!isDay &&
+          employee.rates?.map((rate) => (
+            <div key={rate.id}>
+              <span>
+                {rate.effective_from.endsWith("-01")
+                  ? rate.effective_from.slice(0, 7) + "월부터"
+                  : rate.effective_from + "부터 (기존 이력)"}
+              </span>
+              <b>{money(rate.hourly_rate)}</b>
+              <small>{rate.reason}</small>
+            </div>
+          ))}
+        {isDay &&
+          employee.day_rates?.map((rate) => (
+            <div key={rate.id}>
+              <span>{rate.date} 하루만</span>
+              <b>{money(rate.hourly_rate)}</b>
+              <small>{rate.reason}</small>
+            </div>
+          ))}
       </div>
     </ActionForm>
   );
 }
 export function ShiftForm({ shift }: { shift?: Shift }) {
   const { data, mutate } = useAdmin();
+  const [start, setStart] = useState(
+    localDateTime(shift?.started_at || new Date().toISOString()),
+  );
+  const [end, setEnd] = useState(
+    shift?.ended_at ? localDateTime(shift.ended_at) : "",
+  );
+  const [error, setError] = useState("");
+  const span =
+    start && end
+      ? Date.parse(toShiftInstant(end)!) - Date.parse(toShiftInstant(start)!)
+      : null;
   return (
     <ActionForm
-      submit={(form) =>
-        mutate(
+      submit={async (form) => {
+        const startedAt = toShiftInstant(start, shift?.started_at)!;
+        const endedAt = toShiftInstant(end, shift?.ended_at);
+        const breakMinutes = Number(form.get("break_minutes"));
+        if (
+          endedAt &&
+          (Date.parse(endedAt) <= Date.parse(startedAt) ||
+            Date.parse(endedAt) - Date.parse(startedAt) > 86400000)
+        ) {
+          setError(
+            "퇴근 날짜·시간을 확인해 주세요. 근무 구간은 0시간 초과 24시간 이내입니다.",
+          );
+          return false;
+        }
+        if (
+          endedAt &&
+          breakMinutes * 60000 >= Date.parse(endedAt) - Date.parse(startedAt)
+        ) {
+          setError("휴게시간은 전체 근무시간보다 짧아야 합니다.");
+          return false;
+        }
+        setError("");
+        return mutate(
           shift ? `/admin/records/${shift.id}` : "/admin/records",
           {
             employee_id: form.get("employee_id"),
-            started_at: toInstant(String(form.get("started_at"))),
-            ended_at: toInstant(String(form.get("ended_at"))),
-            break_minutes: Number(form.get("break_minutes")),
+            started_at: startedAt,
+            ended_at: endedAt,
+            break_minutes: breakMinutes,
             note: form.get("note"),
             reason: form.get("reason"),
             ...(shift ? { revision: shift.revision } : {}),
           },
           shift ? "PATCH" : "POST",
-        )
-      }
+        );
+      }}
     >
       <Field label="직원">
         <select
@@ -357,20 +419,55 @@ export function ShiftForm({ shift }: { shift?: Shift }) {
           <input
             name="started_at"
             type="datetime-local"
-            defaultValue={localDateTime(
-              shift?.started_at || new Date().toISOString(),
-            )}
+            step="1"
+            value={start}
+            onChange={(event) => {
+              setStart(event.target.value);
+              setError("");
+            }}
             required
           />
         </Field>
-        <Field label="퇴근 시각 (한국 시간)" hint="근무 중이면 비워두세요.">
+        <Field
+          label="퇴근 시각 (한국 시간)"
+          hint="근무 중이면 비움 · 새벽 퇴근은 다음 날 날짜 선택"
+        >
           <input
             name="ended_at"
             type="datetime-local"
-            defaultValue={shift?.ended_at ? localDateTime(shift.ended_at) : ""}
+            step="1"
+            value={end}
+            onChange={(event) => {
+              setEnd(event.target.value);
+              setError("");
+            }}
           />
         </Field>
       </div>
+      {span !== null && span > 0 && span <= 86400000 && (
+        <p className="small muted">
+          {start.slice(0, 10) !== end.slice(0, 10) ? "다음 날 퇴근 · " : ""}
+          {hours(span / 1000)} · 휴게 공제 전
+        </p>
+      )}
+      {span !== null && span <= 0 && span > -86400000 && (
+        <button
+          type="button"
+          className="button secondary"
+          onClick={() =>
+            setEnd(
+              localDateTime(
+                new Date(
+                  Date.parse(toShiftInstant(end)!) + 86400000,
+                ).toISOString(),
+              ),
+            )
+          }
+        >
+          퇴근을 다음 날로 변경
+        </button>
+      )}
+      {error && <Alert kind="error">{error}</Alert>}
       <Field
         label="실제 휴게시간 (분)"
         hint="실제 휴게만 입력 · 자동 공제 없음"

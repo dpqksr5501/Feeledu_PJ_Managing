@@ -13,6 +13,17 @@ export type AppRelease = {
 // Newest first. Keep IDs stable so skipped versions can be acknowledged together.
 export const appReleases: ReleaseNote[] = [
   {
+    id: "2026-11-13.3",
+    date: "2026-11-13",
+    title: "야간 근무·월 시급",
+    changes: [
+      "자정을 넘는 근무와 누락 기록을 날짜·시간으로 직접 입력할 수 있습니다.",
+      "월 시급과 하루 시급을 나누고, 같은 달 변경 충돌을 확인합니다.",
+      "메모만 정정할 때 원래 기록의 초 단위 시각을 유지합니다.",
+      "출퇴근 화면은 계속 유지하며, 관리자의 2분 미사용 잠금을 제거했습니다.",
+    ],
+  },
+  {
     id: "2026-11-13.2",
     date: "2026-11-13",
     title: "업데이트 안내·조회 개선",

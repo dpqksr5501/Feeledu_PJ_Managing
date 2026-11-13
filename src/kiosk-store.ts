@@ -1,6 +1,6 @@
 import { openDB } from "idb";
 import type { ClockEvent, RosterEntry } from "../shared/types.ts";
-type QueueItem = ClockEvent & { seq: number };
+type QueueItem = ClockEvent & { seq: number; retry_after?: number };
 export const kioskDb = openDB("feeledu-kiosk-v1", 1, {
   upgrade(db) {
     db.createObjectStore("meta");
@@ -37,6 +37,13 @@ export const kioskStore = {
   },
   async remove(id: string) {
     return (await kioskDb).delete("queue", id);
+  },
+  async deferUnknownEmployee(id: string) {
+    const db = await kioskDb;
+    const tx = db.transaction("queue", "readwrite");
+    const item = await tx.store.get(id);
+    if (item) await tx.store.put({ ...item, retry_after: Date.now() + 300000 });
+    await tx.done;
   },
   async archiveAndUnpair() {
     const db = await kioskDb;

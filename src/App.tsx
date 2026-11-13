@@ -6,6 +6,7 @@ import { Alert, Brand, Field, Loading } from "./ui.tsx";
 import Kiosk from "./Kiosk.tsx";
 import AdminApp from "./admin/AdminApp.tsx";
 import DownloadApp from "./DownloadApp.tsx";
+import { ADMIN_IDLE_MS } from "../shared/session-policy.ts";
 import {
   MIN_PASSWORD_LENGTH,
   PASSWORD_HINT,
@@ -87,7 +88,7 @@ function Auth({ setup, done }: { setup: boolean; done: () => void }) {
                 type="checkbox"
                 defaultChecked={matchMedia("(pointer: coarse)").matches}
               />
-              공용 태블릿 · 2분 미사용 시 잠금
+              공용 태블릿 · 화면을 떠나면 로그아웃
             </label>
             <button className="button primary full" disabled={busy}>
               {busy ? "확인 중…" : setup ? "운영자 계정 만들기" : "로그인"}
@@ -144,7 +145,7 @@ export default function App() {
     };
     const active = () => {
       clearTimeout(timer);
-      timer = setTimeout(lock, (admin.shared_tablet ? 2 : 30) * 60000);
+      timer = setTimeout(lock, ADMIN_IDLE_MS);
       if (Date.now() - lastPing > 30000) {
         lastPing = Date.now();
         void send("/admin/activity", {}).catch((error: unknown) => {

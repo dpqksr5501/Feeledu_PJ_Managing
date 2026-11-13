@@ -14,8 +14,16 @@ import { attendanceWeek } from "./attendance.ts";
 import { overlappingShift, shiftRangeSql } from "./shift-query.ts";
 import { HolidayCalendarService } from "./holiday-calendar.ts";
 import { getHolidays } from "./holidays.ts";
+import { testDataPlan, removeTestData } from "./test-data.ts";
 import { addDays, dayStart, seoulDate } from "../shared/time.ts";
-import type { Admin, ClockEvent, Device, Shift } from "../shared/types.ts";
+import type {
+  Admin,
+  ClockEvent,
+  Device,
+  Shift,
+  Rate,
+} from "../shared/types.ts";
+import { rateMonthVersion } from "../shared/rate-month.ts";
 import {
   MIN_PASSWORD_LENGTH,
   PASSWORD_SPECIAL_CHARACTER,
@@ -487,6 +495,52 @@ export function registerRoutes(
     });
     res.json({ ok: true });
   });
+  admin.post("/employees/:id/month-rates", (req: Authed, res) => {
+    const body = z
+      .object({
+        month: z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])$/),
+        hourly_rate: z.number().int().min(1).max(1000000),
+        reason,
+        expected: z.string().max(30000),
+      })
+      .parse(req.body);
+    const employeeId = idSchema.parse(req.params.id);
+    const from = date.parse(body.month + "-01");
+    const until = addDays(from, 32).slice(0, 7) + "-01";
+    transaction(db, () => {
+      if (!one(db, "SELECT id FROM employees WHERE id=?", employeeId))
+        fail(404, "직원을 찾을 수 없습니다.");
+      const before = db
+        .prepare(
+          "SELECT * FROM rates WHERE employee_id=? AND effective_from>=? AND effective_from<? ORDER BY effective_from",
+        )
+        .all(employeeId, from, until) as unknown as Rate[];
+      if (rateMonthVersion(before, body.month) !== body.expected)
+        fail(
+          409,
+          "다른 관리자가 이달 시급을 변경했습니다. 새로고침 후 다시 확인해 주세요.",
+        );
+      db.prepare(
+        "DELETE FROM rates WHERE employee_id=? AND effective_from>=? AND effective_from<?",
+      ).run(employeeId, from, until);
+      db.prepare("INSERT INTO rates VALUES(?,?,?,?,?,?)").run(
+        randomUUID(),
+        employeeId,
+        from,
+        body.hourly_rate,
+        body.reason,
+        new Date().toISOString(),
+      );
+      audit(db, req.admin!.id, "rate.month", employeeId, {
+        month: body.month,
+        before,
+        hourly_rate: body.hourly_rate,
+        reason: body.reason,
+      });
+    });
+    res.json({ ok: true });
+  });
+  // Retain the date-based endpoint for already-open older clients and old history.
   admin.post("/employees/:id/rates", (req: Authed, res) => {
     const body = z
       .object({
@@ -656,6 +710,8 @@ export function registerRoutes(
         fail(404, "수정할 기록을 찾을 수 없습니다.");
       if (before.revision !== body.revision)
         fail(409, "다른 관리자가 기록을 변경했습니다. 새로고침해 주세요.");
+      if (!one(db, "SELECT id FROM employees WHERE id=?", body.employee_id))
+        fail(404, "직원을 찾을 수 없습니다.");
       validateShift(body, id);
       db.prepare(
         "UPDATE shifts SET employee_id=?,started_at=?,ended_at=?,break_minutes=?,note=?,revision=revision+1 WHERE id=?",
@@ -884,11 +940,9 @@ export function registerRoutes(
       try {
         res.json(await holidayCalendar.sync(year, req.admin!.id));
       } catch (error) {
-        res
-          .status(503)
-          .json({
-            error: error instanceof Error ? error.message : "공휴일 갱신 실패",
-          });
+        res.status(503).json({
+          error: error instanceof Error ? error.message : "공휴일 갱신 실패",
+        });
       }
     },
   );
@@ -910,12 +964,10 @@ export function registerRoutes(
         );
         res.json({ ok: true });
       } catch {
-        res
-          .status(409)
-          .json({
-            error:
-              "공휴일 자료가 변경됐거나 검토가 필요합니다. 새로고침해 주세요.",
-          });
+        res.status(409).json({
+          error:
+            "공휴일 자료가 변경됐거나 검토가 필요합니다. 새로고침해 주세요.",
+        });
       }
     });
   admin.get("/holidays", (_req, res) => res.json(getHolidays(db)));
@@ -1200,6 +1252,30 @@ export function registerRoutes(
     );
     res.json({ createdAt: last?.created_at ?? null });
   });
+  admin.get("/test-data", owner, (_req, res) => res.json(testDataPlan(db)));
+  admin.post(
+    "/test-data/cleanup",
+    owner,
+    sensitiveLimit,
+    (req: Authed, res) => {
+      const body = z
+        .object({
+          fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+          current: z.string().min(1).max(128),
+          reason,
+        })
+        .parse(req.body);
+      proveCurrentPassword(req, res, body.current);
+      const result = removeTestData(
+        db,
+        body.fingerprint,
+        req.admin!.id,
+        body.reason,
+      );
+      if (result.conflict) fail(409, result.conflict);
+      res.json(result);
+    },
+  );
   admin.get("/backup", owner, () =>
     fail(403, "현재 비밀번호를 확인한 후 백업을 받을 수 있습니다."),
   );

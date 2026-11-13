@@ -41,7 +41,7 @@ test("only a verified changed build creates a receipt; skipped release notes sta
   ledger.begin(current, original);
   expect(ledger.arrive(original)).toBeNull();
   const receipt = new UpdateHistory(() => storage).arrive(current)!;
-  expect(receipt.ids).toEqual(appReleases.slice(0, 2).map((note) => note.id));
+  expect(receipt.ids).toEqual(appReleases.slice(0, -1).map((note) => note.id));
   expect(new UpdateHistory(() => storage).arrive(current)).toEqual(receipt);
   ledger.acknowledge(current);
   expect(new UpdateHistory(() => storage).arrive(current)).toBeNull();

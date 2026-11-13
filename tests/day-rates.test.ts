@@ -202,7 +202,7 @@ test("shared tablet sessions expire on the server and only deliberate activity e
       f.db.prepare("SELECT * FROM sessions WHERE shared_tablet=1").get()!;
     expect(
       Date.parse(String(session().expires_at)) - Date.now(),
-    ).toBeLessThanOrEqual(120000);
+    ).toBeLessThanOrEqual(30 * 60000);
     f.db
       .prepare("UPDATE sessions SET expires_at=? WHERE shared_tablet=1")
       .run(new Date(Date.now() + 45000).toISOString());
@@ -214,7 +214,7 @@ test("shared tablet sessions expire on the server and only deliberate activity e
     ).toBe(200);
     expect(
       Date.parse(String(session().expires_at)) - Date.now(),
-    ).toBeGreaterThan(110000);
+    ).toBeGreaterThan(29 * 60000);
     f.db
       .prepare("UPDATE sessions SET expires_at=? WHERE shared_tablet=1")
       .run("2000-01-01T00:00:00.000Z");

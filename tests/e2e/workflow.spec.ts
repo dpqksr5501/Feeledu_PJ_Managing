@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { mkdirSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 
 test("operator administration, paired tablet, offline reload and manager access", async ({
   browser,
@@ -54,7 +55,7 @@ test("operator administration, paired tablet, offline reload and manager access"
   await dialog.getByLabel("이름", { exact: true }).fill("김조교");
   await dialog.getByLabel("휴대전화 뒷자리").fill("0012");
   await dialog.getByLabel("기본 시급 (원)").fill("12000");
-  await dialog.getByLabel("시급 적용 시작일").fill("2026-01-01");
+  await dialog.getByLabel("최초 시급 적용 월").fill("2026-01");
   await dialog.getByRole("button", { name: "저장하기" }).click();
   await expect(dialog).not.toBeVisible();
   await expect(admin.getByText("0012", { exact: true })).toBeVisible();
@@ -73,7 +74,7 @@ test("operator administration, paired tablet, offline reload and manager access"
   await dialog.getByRole("button", { name: "저장하기" }).click();
   await expect(dialog).not.toBeVisible();
   await expect(admin.getByText("데스크 조교", { exact: true })).toBeVisible();
-  await admin.getByRole("button", { name: "시급 이력", exact: true }).click();
+  await admin.getByRole("button", { name: "월 시급", exact: true }).click();
   dialog = admin.getByRole("dialog");
   await expect(dialog.getByText("최초 등록", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "닫기" }).click();
@@ -166,12 +167,43 @@ test("operator administration, paired tablet, offline reload and manager access"
     )
     .toBe(true);
   await selectPerson();
+  const orphanId = randomUUID();
+  let orphanAttempts = 0;
   const burstIds = new Set<string>();
   const trackClock = (request: import("@playwright/test").Request) => {
-    if (request.url().endsWith("/api/kiosk/events"))
-      burstIds.add(request.postDataJSON().id);
+    if (request.url().endsWith("/api/kiosk/events")) {
+      if (request.postDataJSON().id === orphanId) orphanAttempts++;
+      else burstIds.add(request.postDataJSON().id);
+    }
   };
   kiosk.on("request", trackClock);
+  await kiosk.evaluate(
+    async ({ id, employeeId }) => {
+      const db = await new Promise<IDBDatabase>((resolve) => {
+        const req = indexedDB.open("feeledu-kiosk-v1", 1);
+        req.onsuccess = () => resolve(req.result);
+      });
+      const tx = db.transaction(["queue", "meta"], "readwrite");
+      const sequence = await new Promise<number>((resolve) => {
+        const req = tx.objectStore("meta").get("sequence");
+        req.onsuccess = () => resolve(Number(req.result || 0) + 1);
+      });
+      tx.objectStore("queue").put({
+        id,
+        employee_id: employeeId,
+        action: "in",
+        captured_at: new Date().toISOString(),
+        offline: false,
+        seq: sequence,
+      });
+      tx.objectStore("meta").put(sequence, "sequence");
+      await new Promise<void>((resolve) => {
+        tx.oncomplete = () => resolve();
+      });
+      db.close();
+    },
+    { id: orphanId, employeeId: randomUUID() },
+  );
   await kiosk
     .getByRole("button", { name: "출근" })
     .evaluate((button: HTMLButtonElement) => {
@@ -179,6 +211,34 @@ test("operator administration, paired tablet, offline reload and manager access"
     });
   await expect(kiosk.getByText("출근 완료", { exact: true })).toBeVisible();
   expect(burstIds.size).toBe(1);
+  expect(orphanAttempts).toBe(1);
+  await expect(kiosk.getByText("전송 대기 1건", { exact: true })).toBeVisible();
+  await kiosk.getByRole("button", { name: "다시 전송", exact: true }).click();
+  expect(orphanAttempts).toBe(1);
+  await kiosk.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve) => {
+      const req = indexedDB.open("feeledu-kiosk-v1", 1);
+      req.onsuccess = () => resolve(req.result);
+    });
+    const tx = db.transaction("queue", "readwrite");
+    // Test fixture cleanup, after proving the application kept the orphan intact.
+    const read = tx.objectStore("queue").get(id);
+    await new Promise<void>((resolve, reject) => {
+      read.onsuccess = () => {
+        if (!read.result?.retry_after)
+          reject(Error("Orphan was not preserved/deferred"));
+        else {
+          tx.objectStore("queue").delete(id);
+          resolve();
+        }
+      };
+    });
+    await new Promise<void>((resolve) => {
+      tx.oncomplete = () => resolve();
+    });
+    db.close();
+  }, orphanId);
+  await kiosk.getByRole("button", { name: "다시 전송", exact: true }).click();
   kiosk.off("request", trackClock);
   await expect(kiosk.getByText("전송 대기 0건", { exact: true })).toBeVisible();
   await selectPerson();
@@ -239,7 +299,9 @@ test("operator administration, paired tablet, offline reload and manager access"
     await expect(admin.locator(".review-row")).toHaveCount(1 - i);
   }
   await expect(admin.locator("tbody tr")).toHaveCount(2);
-  await admin.getByRole("button", { name: "기록 추가", exact: true }).click();
+  await admin
+    .getByRole("button", { name: "출퇴근 직접 입력", exact: true })
+    .click();
   dialog = admin.getByRole("dialog");
   await dialog
     .getByLabel("직원", { exact: true })
@@ -272,10 +334,10 @@ test("operator administration, paired tablet, offline reload and manager access"
     admin.getByText("확정본 v1 보존 중", { exact: true }),
   ).toBeVisible();
   await admin.getByRole("button", { name: "직원·시급", exact: true }).click();
-  await admin.getByRole("button", { name: "시급 이력", exact: true }).click();
+  await admin.getByRole("button", { name: "월 시급", exact: true }).click();
   dialog = admin.getByRole("dialog");
-  await dialog.getByLabel("적용 시작일").fill("2026-10-26");
-  await dialog.getByLabel("새 시급 (원)").fill("13000");
+  await dialog.getByLabel("적용 월").fill("2026-10");
+  await dialog.getByLabel("월 시급 (원)").fill("13000");
   await dialog.getByLabel("변경 사유").fill("지난주 시급 인상 소급");
   await dialog.getByRole("button", { name: "저장하기" }).click();
   await expect(dialog).not.toBeVisible();
@@ -429,9 +491,8 @@ test("operator administration, paired tablet, offline reload and manager access"
   // Daily overrides are separate from effective-from raises and remain visible
   // alongside holiday work on both desktop and a shared administration tablet.
   await admin.getByRole("button", { name: "직원·시급", exact: true }).click();
-  await admin.getByRole("button", { name: "시급 이력", exact: true }).click();
+  await admin.getByRole("button", { name: "하루 시급", exact: true }).click();
   dialog = admin.getByRole("dialog");
-  await dialog.getByLabel("적용 범위").selectOption("day");
   await dialog.getByLabel("적용 날짜").fill("2026-10-26");
   await dialog.getByLabel("새 시급 (원)").fill("20000");
   await dialog.getByLabel("변경 사유").fill("하루 특별 근무 시급");
@@ -507,6 +568,10 @@ test("operator administration, paired tablet, offline reload and manager access"
     fullPage: true,
   });
   await tabletAdmin.clock.fastForward(121000);
+  await expect(
+    tabletAdmin.getByRole("heading", { name: "근무기록", exact: true }),
+  ).toBeVisible();
+  await tabletAdmin.clock.fastForward(30 * 60000);
   await expect(
     tabletAdmin.getByRole("heading", { name: "관리자 로그인", exact: true }),
   ).toBeVisible();
@@ -686,6 +751,90 @@ test("operator administration, paired tablet, offline reload and manager access"
   expect(reads).not.toContain("/api/admin/employees");
   expect(reads).not.toContain("/api/admin/payroll");
   expect(reads).not.toContain("/api/admin/audit");
+  // A manager can supply a missed overnight punch and correct its note without
+  // rounding the seconds/milliseconds stored by the server.
+  const nightId = await demoEmployee("야간 검증", "0099");
+  let freshRecords = admin.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/admin/records" &&
+      response.request().method() === "GET",
+  );
+  await admin.getByRole("button", { name: "새로고침", exact: true }).click();
+  await freshRecords;
+  await admin
+    .getByRole("button", { name: "출퇴근 직접 입력", exact: true })
+    .click();
+  dialog = admin.getByRole("dialog");
+  await dialog.getByLabel("직원", { exact: true }).selectOption(nightId);
+  await dialog.getByLabel("출근 시각 (한국 시간)").fill("2026-10-31T22:00:27");
+  await dialog.getByLabel("퇴근 시각 (한국 시간)").fill("2026-10-31T04:00:27");
+  await dialog
+    .getByRole("button", { name: "퇴근을 다음 날로 변경", exact: true })
+    .click();
+  await expect(
+    dialog.getByText("다음 날 퇴근 · 6시간 · 휴게 공제 전", { exact: true }),
+  ).toBeVisible();
+  await dialog.getByLabel("실제 휴게시간 (분)").fill("30");
+  await dialog
+    .getByLabel("등록·정정 사유")
+    .fill("출퇴근 누락 관리자 직접 입력");
+  await admin.screenshot({
+    path: ".tmp/qa-night-shift-form.png",
+    fullPage: true,
+  });
+  const manualResponse = admin.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/admin/records" &&
+      response.request().method() === "POST",
+  );
+  await dialog.getByRole("button", { name: "저장하기", exact: true }).click();
+  const manualId = (await (await manualResponse).json()).id;
+  await expect(dialog).not.toBeVisible();
+  const recorded = async () =>
+    (
+      await (
+        await adminContext.request.get(
+          "/api/admin/records?from=2026-10-31&to=2026-11-01",
+        )
+      ).json()
+    ).find((row: { id: string }) => row.id === manualId);
+  const manual = await recorded();
+  expect(manual.started_at).toBe("2026-10-31T13:00:27.000Z");
+  expect(manual.ended_at).toBe("2026-10-31T19:00:27.000Z");
+  const precise = {
+    ...manual,
+    started_at: "2026-10-31T13:00:27.321Z",
+    ended_at: "2026-10-31T19:00:27.789Z",
+    reason: "원본 초 단위 보존 검증",
+  };
+  expect(
+    (
+      await adminContext.request.patch(`/api/admin/records/${manualId}`, {
+        headers: { "X-Requested-With": "Feeledu" },
+        data: precise,
+      })
+    ).status(),
+  ).toBe(200);
+  freshRecords = admin.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/admin/records" &&
+      response.request().method() === "GET",
+  );
+  await admin.getByRole("button", { name: "새로고침", exact: true }).click();
+  await freshRecords;
+  await admin
+    .getByRole("row")
+    .filter({ hasText: "야간 검증" })
+    .getByRole("button", { name: "정정", exact: true })
+    .click();
+  dialog = admin.getByRole("dialog");
+  await dialog.getByLabel("근무 메모").fill("시각은 그대로 두고 메모만 수정");
+  await dialog.getByLabel("등록·정정 사유").fill("누락 기록 메모 정정");
+  await dialog.getByRole("button", { name: "저장하기", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  const corrected = await recorded();
+  expect(corrected.started_at).toBe(precise.started_at);
+  expect(corrected.ended_at).toBe(precise.ended_at);
   expect(errors).toEqual([]);
   await managerContext.close();
   await kioskContext.close();
