@@ -150,8 +150,14 @@ export function startAppUpdates() {
   );
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (state.applying) return;
-    if (state.current) externalReady = true;
-    void synchronizeVersions();
+    void (async () => {
+      const active = await readVersion(navigator.serviceWorker.controller);
+      // First-install clients.claim() also changes the controller. Only a
+      // different revision represents an update activated by another tab.
+      if (state.current && active)
+        externalReady = active.revision !== state.current.revision;
+      await synchronizeVersions();
+    })();
   });
   window.addEventListener("storage", (event) => {
     if (event.key === UPDATE_HISTORY_KEY && state.current) {

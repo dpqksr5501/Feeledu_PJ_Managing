@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, Check, RefreshCw } from "lucide-react";
+import { Bell, Check, RefreshCw, X } from "lucide-react";
 import { appReleases } from "../shared/app-releases.ts";
 import {
   canShowUpdateReceipt,
@@ -34,6 +34,7 @@ export function UpdateHistoryButton() {
 export default function UpdateCenter() {
   const update = useAppUpdate();
   const [receiptVisible, setReceiptVisible] = useState(false);
+  const [readyDismissed, setReadyDismissed] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [moreBelow, setMoreBelow] = useState(false);
   const list = useRef<HTMLDivElement>(null);
@@ -42,6 +43,9 @@ export default function UpdateCenter() {
     setReceiptVisible(false);
   }, []);
   const cancel = useCallback(() => cancelAppUpdate(), []);
+  useEffect(() => {
+    if (!update.ready) setReadyDismissed(false);
+  }, [update.ready]);
   useEffect(() => {
     if (!update.receipt) {
       setReceiptVisible(false);
@@ -135,27 +139,39 @@ export default function UpdateCenter() {
     );
   return (
     <div className="update-notice-root">
-      {update.ready && !visible && (
-        <aside className="update-ready" role="status">
-          <div>
-            <strong>업데이트가 있습니다</strong>
-            <small>{update.error || "입력과 저장을 마친 뒤 적용합니다."}</small>
-          </div>
-          <button
-            className="button secondary small"
-            onClick={openUpdateHistory}
-          >
-            변경 내역
-          </button>
-          <button
-            className="button primary small"
-            disabled={update.applying}
-            onClick={() => void requestAppUpdate()}
-          >
-            적용
-          </button>
-        </aside>
-      )}
+      {update.ready &&
+        !readyDismissed &&
+        !visible &&
+        location.pathname !== "/download" && (
+          <aside className="update-ready" role="status">
+            <div>
+              <strong>업데이트가 있습니다</strong>
+              <small>
+                {update.error || "입력과 저장을 마친 뒤 적용합니다."}
+              </small>
+            </div>
+            <button
+              className="button secondary small"
+              onClick={openUpdateHistory}
+            >
+              변경 내역
+            </button>
+            <button
+              className="button primary small"
+              disabled={update.applying}
+              onClick={() => void requestAppUpdate()}
+            >
+              적용
+            </button>
+            <button
+              className="icon-button"
+              aria-label="업데이트 안내 접기"
+              onClick={() => setReadyDismissed(true)}
+            >
+              <X size={18} />
+            </button>
+          </aside>
+        )}
       {visible && (
         <Modal
           title={

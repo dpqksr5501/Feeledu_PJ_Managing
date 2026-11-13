@@ -42,6 +42,24 @@ test("an installed shell preserves its offline queue across a safe idle update",
     await expect
       .poll(() => page.evaluate(() => !!navigator.serviceWorker.controller))
       .toBe(true);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const history = JSON.parse(
+            localStorage.getItem("feeledu-app-updates-v1") || "{}",
+          );
+          return Boolean(history.seen?.revision);
+        }),
+      )
+      .toBe(true);
+    // First-install claiming and repeated same-controller events are not updates.
+    await page.evaluate(async () => {
+      navigator.serviceWorker.dispatchEvent(new Event("controllerchange"));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+    await expect(
+      page.getByRole("button", { name: "적용", exact: true }),
+    ).not.toBeVisible();
     const association = await page.request.get("/.well-known/assetlinks.json");
     expect(association.status()).toBe(200);
     expect((await association.json())[0].target.package_name).toBe(
