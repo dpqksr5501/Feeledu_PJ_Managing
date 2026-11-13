@@ -238,7 +238,14 @@ test("operator administration, paired tablet, offline reload and manager access"
     });
     db.close();
   }, orphanId);
-  await kiosk.getByRole("button", { name: "다시 전송", exact: true }).click();
+  await expect
+    .poll(async () => {
+      // The fixture cleared IndexedDB outside React. A prior drain may already
+      // have observed it and hidden the retry button before the next click.
+      await kiosk.evaluate(() => window.dispatchEvent(new Event("online")));
+      return kiosk.getByText("전송 대기 0건", { exact: true }).count();
+    })
+    .toBe(1);
   kiosk.off("request", trackClock);
   await expect(kiosk.getByText("전송 대기 0건", { exact: true })).toBeVisible();
   await selectPerson();
