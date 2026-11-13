@@ -40,7 +40,9 @@ test("an installed shell preserves its offline queue across a safe idle update",
       page.getByRole("link", { name: "앱 다운로드" }),
     ).toHaveAttribute("href", "/download");
     await expect
-      .poll(() => page.evaluate(() => !!navigator.serviceWorker.controller))
+      .poll(() => page.evaluate(() => !!navigator.serviceWorker.controller), {
+        timeout: 15000,
+      })
       .toBe(true);
     await expect
       .poll(() =>

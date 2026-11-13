@@ -116,6 +116,8 @@ async function synchronizeVersions() {
 }
 function watch(worker: ServiceWorker | null) {
   worker?.addEventListener("statechange", () => {
+    if (worker.state === "activated" && !navigator.serviceWorker.controller)
+      worker.postMessage("CLAIM_CLIENTS");
     if (["installed", "activated", "redundant"].includes(worker.state))
       void synchronizeVersions();
   });
@@ -171,6 +173,13 @@ export function startAppUpdates() {
     .register("/sw.js", { updateViaCache: "none" })
     .then(async (reg) => {
       registration = reg;
+      // A navigation can finish between first activation and its clients.claim.
+      // Claim this now-running document without reloading any unsaved input.
+      if (
+        !navigator.serviceWorker.controller &&
+        reg.active?.state === "activated"
+      )
+        reg.active.postMessage("CLAIM_CLIENTS");
       watch(reg.installing);
       reg.addEventListener("updatefound", () => watch(reg.installing));
       await synchronizeVersions();

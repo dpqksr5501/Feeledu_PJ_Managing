@@ -31,7 +31,7 @@ writeFileSync(
 const RELEASE=${JSON.stringify(release)};
 const FILES=${JSON.stringify([...files, "/app-release.json"])};
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES))));
-self.addEventListener('message',e=>{if(e.data==='SKIP_WAITING')self.skipWaiting();if(e.data==='GET_APP_RELEASE')e.ports[0]?.postMessage(RELEASE)});
+self.addEventListener('message',e=>{if(e.data==='SKIP_WAITING')self.skipWaiting();if(e.data==='GET_APP_RELEASE')e.ports[0]?.postMessage(RELEASE);if(e.data==='CLAIM_CLIENTS')e.waitUntil(self.clients.claim())});
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('feeledu-')&&k!==CACHE).slice(0,-1).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{const url=new URL(e.request.url);if(e.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/')||url.pathname.startsWith('/downloads/'))return;
 if(url.pathname==='/app-release.json'&&e.request.cache==='no-store')return;
