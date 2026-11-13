@@ -19,6 +19,32 @@ test("ten years of history keeps indexed Cloudflare row reads bounded and result
       script: bundled.outputFiles[0].text,
       compatibilityDate: "2026-11-08",
       compatibilityFlags: ["nodejs_compat"],
+      outboundService: async (request) => {
+        const url = new URL(request.url);
+        expect(url.origin + url.pathname).toBe(
+          "https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo",
+        );
+        const month = url.searchParams.get("solMonth")!;
+        const dates = [
+          "01-01",
+          "03-01",
+          "05-05",
+          "06-06",
+          "08-15",
+          "10-03",
+          "10-09",
+          "12-25",
+        ].filter((date) => date.startsWith(month));
+        const items = dates
+          .map(
+            (date) =>
+              `<item><locdate>2026${date.replace("-", "")}</locdate><dateName>공휴일</dateName><isHoliday>Y</isHoliday></item>`,
+          )
+          .join("");
+        return new Response(
+          `<response><header><resultCode>00</resultCode></header><body><items>${items}</items><pageNo>1</pageNo><numOfRows>100</numOfRows><totalCount>${dates.length}</totalCount></body></response>`,
+        );
+      },
       durableObjects: {
         BENCHMARK: { className: "QueryBenchmark", useSQLite: true },
       },

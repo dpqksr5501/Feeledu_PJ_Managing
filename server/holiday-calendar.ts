@@ -142,7 +142,8 @@ export class HolidayCalendarService {
   ) {
     this.db = db;
     this.key = key;
-    this.fetcher = fetcher;
+    // Workerd native fetch validates its receiver; never call it as a service method.
+    this.fetcher = fetcher.bind(globalThis);
   }
   get configured() {
     return Boolean(this.key()?.trim());
@@ -250,7 +251,7 @@ export class HolidayCalendarService {
                   await responseText(
                     await this.fetcher(url, {
                       signal: AbortSignal.timeout(8000),
-                      redirect: "error",
+                      redirect: "manual",
                     }),
                   ),
                   year,

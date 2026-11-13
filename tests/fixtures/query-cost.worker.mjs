@@ -159,28 +159,6 @@ export class QueryBenchmark extends DurableObject {
     const calendar = new HolidayCalendarService(
       db,
       () => "test-only-calendar-key",
-      async (input) => {
-        const month = new URL(input).searchParams.get("solMonth");
-        const dates = [
-          "01-01",
-          "03-01",
-          "05-05",
-          "06-06",
-          "08-15",
-          "10-03",
-          "10-09",
-          "12-25",
-        ].filter((date) => date.startsWith(month));
-        const items = dates
-          .map(
-            (date) =>
-              `<item><locdate>2026${date.replace("-", "")}</locdate><dateName>공휴일</dateName><isHoliday>Y</isHoliday></item>`,
-          )
-          .join("");
-        return new Response(
-          `<response><header><resultCode>00</resultCode></header><body><items>${items}</items><pageNo>1</pageNo><numOfRows>100</numOfRows><totalCount>${dates.length}</totalCount></body></response>`,
-        );
-      },
     );
     await calendar.sync(2026);
     return Response.json({
