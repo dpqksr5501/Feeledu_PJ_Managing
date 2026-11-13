@@ -82,6 +82,7 @@ test("indexed range preserves cross-midnight, long open, voided and exact bounda
     db.close();
   }
 });
+// This exercises real disk fsync and two reopenings, not a latency benchmark.
 test("migrates a version-1 employee without dropping data and can safely reopen the result", () => {
   const temporary = workspace();
   try {
@@ -118,7 +119,7 @@ test("migrates a version-1 employee without dropping data and can safely reopen 
   } finally {
     temporary.close();
   }
-});
+}, 30000);
 test("refuses a future schema before modifying the database", () => {
   const temporary = workspace();
   try {
