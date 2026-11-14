@@ -23,9 +23,11 @@ import {
   registerUpdateGuard,
 } from "./app-update.ts";
 import { UpdateHistoryButton } from "./UpdateCenter.tsx";
+import { useAppDisplay } from "./app-display.ts";
 type KioskNotice = { kind: "success" | "review" | "local"; text: string };
 
 export default function Kiosk() {
+  const appDisplay = useAppDisplay();
   const [token, setToken] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [code, setCode] = useState("");
@@ -375,14 +377,16 @@ export default function Kiosk() {
         <Brand />
         <div className="row">
           <UpdateHistoryButton />
-          <a
-            className="text-button"
-            href="/download"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Download size={16} /> 앱 다운로드
-          </a>
+          {!appDisplay && (
+            <a
+              className="text-button"
+              href="/download"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <Download size={16} /> 앱 다운로드
+            </a>
+          )}
           <span className={`connection ${online ? "" : "offline"}`}>
             {online ? <Wifi size={16} /> : <WifiOff size={16} />}{" "}
             {online ? "연결됨" : "오프라인"}

@@ -39,14 +39,14 @@ function Auth({ setup, done }: { setup: boolean; done: () => void }) {
       <section className="auth-form">
         <div className="auth-card">
           <Brand />
-          <h1>{setup ? "운영자 등록" : "관리자 로그인"}</h1>
+          <h1>{setup ? "개발자 등록" : "관리자 로그인"}</h1>
           <form onSubmit={submit}>
             {setup && (
               <>
                 <Field label="초기 설정 코드" hint="서버 터미널의 설정 코드">
                   <input name="token" required autoComplete="off" />
                 </Field>
-                <Field label="운영자 이름">
+                <Field label="개발자 이름">
                   <input
                     name="name"
                     required
@@ -84,7 +84,7 @@ function Auth({ setup, done }: { setup: boolean; done: () => void }) {
             </Field>
             {error && <Alert kind="error">{error}</Alert>}
             <button className="button primary full" disabled={busy}>
-              {busy ? "확인 중…" : setup ? "운영자 계정 만들기" : "로그인"}
+              {busy ? "확인 중…" : setup ? "개발자 계정 만들기" : "로그인"}
               <ArrowRight size={18} />
             </button>
           </form>
@@ -217,6 +217,7 @@ export default function App() {
   return admin ? (
     <AdminApp
       admin={admin}
+      changed={setAdmin}
       expired={() => setAdmin(null)}
       logout={async () => {
         await send("/logout", {});

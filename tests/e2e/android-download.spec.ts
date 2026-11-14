@@ -2,6 +2,39 @@ import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 
+test("installed TWA hides the download promotion across reloads while a normal Android browser keeps it", async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({
+    "User-Agent":
+      "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/142.0.0.0 Mobile Safari/537.36",
+  });
+  await page.goto("/kiosk");
+  await expect(
+    page.getByRole("link", { name: "앱 다운로드", exact: true }),
+  ).toBeVisible();
+  await page.addInitScript(() =>
+    Object.defineProperty(document, "referrer", {
+      configurable: true,
+      get: () => "android-app://kr.feeledu.attendance/",
+    }),
+  );
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "태블릿 연결", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "앱 다운로드", exact: true }),
+  ).toHaveCount(0);
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "태블릿 연결", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "앱 다운로드", exact: true }),
+  ).toHaveCount(0);
+});
+
 test("Chrome finishes the first-party APK download and HTTP byte ranges resume the same file", async ({
   page,
 }) => {

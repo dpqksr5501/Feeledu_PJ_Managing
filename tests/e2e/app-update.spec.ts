@@ -129,7 +129,7 @@ test("an installed shell preserves its offline queue across a safe idle update",
     ).toBe(true);
     const editing = await page.context().newPage();
     await editing.goto("/admin");
-    await editing.getByLabel("운영자 이름").fill("작성 중인 관리자 양식");
+    await editing.getByLabel("개발자 이름").fill("작성 중인 관리자 양식");
     await editing.getByRole("button", { name: "적용", exact: true }).click();
     await expect(
       editing.getByText(/작성 중인 화면을 저장하거나 닫고/),
@@ -176,7 +176,7 @@ test("an installed shell preserves its offline queue across a safe idle update",
     });
     await expect(notice).toBeVisible();
     // Another tab's activation must not reload a dirty administrator form.
-    await expect(editing.getByLabel("운영자 이름")).toHaveValue(
+    await expect(editing.getByLabel("개발자 이름")).toHaveValue(
       "작성 중인 관리자 양식",
     );
     await editing.close();

@@ -2,6 +2,8 @@
 
 Scope: repository and isolated Node/Cloudflare tests. No brute-force attempts or test personnel records were written to production. This is a focused application review, not a certification or exhaustive penetration test.
 
+2026-11-14 display/profile follow-up: `owner` is displayed as 개발자; stored roles, owner-only endpoints and manager permissions do not change. Authenticated `PATCH /admin/profile` only accepts `name` and `expectedName`, always targets the authenticated ID, checks concurrent renames and audits changes atomically. It preserves sessions; credential resets and deactivation retain their existing session revocation rules. Calendar colours reuse cached holiday dates without extra API calls and give holidays priority over Saturday. Native/PWA display detection only hides an installation promotion and never grants permissions; no app-state flag is persisted in shared localStorage. Browser tests simulate native referrers separately from ordinary Chrome; they do not certify every physical tablet. Detection follows [Google's PWA guidance](https://web.dev/learn/pwa/detection/).
+
 2026-11-14 night-premium follow-up: precise break intervals use bounded authenticated record APIs, normalized UTC timestamps, existing optimistic revisions and atomic audit writes. The server rejects overlapping/out-of-shift intervals and inconsistent totals; older clients cannot implicitly erase intervals. Schema-5 snapshots include break intervals, restore foreign keys and validate interval consistency inside the import transaction. Schema-3/4 restores remain supported; original settlement JSON is not rewritten. Indexed batch break reads avoid per-employee queries. See [night calculation scope and official sources](NIGHT_SHIFTS.md).
 
 ## Remediated

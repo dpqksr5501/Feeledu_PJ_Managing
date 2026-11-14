@@ -13,6 +13,17 @@ export type AppRelease = {
 // Newest first. Keep IDs stable so skipped versions can be acknowledged together.
 export const appReleases: ReleaseNote[] = [
   {
+    id: "2026-11-14.4",
+    date: "2026-11-14",
+    title: "휴일 색상·앱 안내·계정 표시",
+    changes: [
+      "근무일은 토요일 파란색, 일요일·공휴일 빨간색으로 표시합니다. 대체·임시공휴일도 저장된 공식 달력에 반영되면 함께 표시합니다.",
+      "설치된 앱에서는 앱 다운로드 안내를 숨기고, 일반 브라우저에서는 유지합니다.",
+      "운영자 권한의 표시 이름을 개발자로 바꿨습니다. 실제 권한은 유지됩니다.",
+      "설정에서 로그인 유지 상태로 본인의 표시 이름을 변경할 수 있습니다.",
+    ],
+  },
+  {
     id: "2026-11-14.3",
     date: "2026-11-14",
     title: "근무일 요일 표시",

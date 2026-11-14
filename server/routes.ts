@@ -251,7 +251,7 @@ export function registerRoutes(
   };
   const owner = (req: Authed, _res: Response, next: NextFunction) => {
     if (req.admin?.role !== "owner")
-      return next(new HttpError(403, "운영자 권한이 필요합니다."));
+      return next(new HttpError(403, "개발자 권한이 필요합니다."));
     next();
   };
   const requireDevice = (req: Authed, _res: Response, next: NextFunction) => {
@@ -393,6 +393,32 @@ export function registerRoutes(
   const admin = router();
   app.use("/api/admin", requireAdmin, admin);
   admin.get("/me", (req: Authed, res) => res.json(req.admin));
+  admin.patch("/profile", (req: Authed, res) => {
+    const body = z
+      .object({ name: text, expectedName: text })
+      .strict()
+      .parse(req.body);
+    transaction(db, () => {
+      const current = one<{ name: string }>(
+        db,
+        "SELECT name FROM admins WHERE id=?",
+        req.admin!.id,
+      )!;
+      if (current.name !== body.expectedName)
+        fail(409, "이름이 변경됐습니다. 새로고침 후 다시 확인해 주세요.");
+      if (current.name !== body.name) {
+        db.prepare("UPDATE admins SET name=? WHERE id=?").run(
+          body.name,
+          req.admin!.id,
+        );
+        audit(db, req.admin!.id, "profile.update", req.admin!.id, {
+          before: current.name,
+          after: body.name,
+        });
+      }
+    });
+    res.json({ ...req.admin!, name: body.name });
+  });
   admin.post("/session/keep", (req: Authed, res) => {
     transaction(db, () => {
       db.prepare("UPDATE sessions SET expires_at=? WHERE token_hash=?").run(
@@ -1275,7 +1301,7 @@ export function registerRoutes(
       if (before.role === "owner")
         fail(
           403,
-          "운영자 계정은 여기서 변경할 수 없습니다. 내 비밀번호 변경을 이용해 주세요.",
+          "개발자 계정은 여기서 변경할 수 없습니다. 내 이름·비밀번호 변경을 이용해 주세요.",
         );
       db.prepare("UPDATE admins SET active=?,name=? WHERE id=?").run(
         Number(body.active),

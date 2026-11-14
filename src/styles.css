@@ -16,6 +16,12 @@
 * {
   box-sizing: border-box;
 }
+.calendar-date-red {
+  color: #c51623;
+}
+.calendar-date-blue {
+  color: #155fc0;
+}
 body {
   margin: 0;
 }

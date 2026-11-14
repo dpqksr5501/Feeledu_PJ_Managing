@@ -833,10 +833,35 @@ export function AccountForm({ account }: { account?: Admin }) {
       <Help title="계정 권한·변경 안내">
         <p className="muted small">
           관리자는 직원·시급·근무·수당·정산을 수정할 수 있습니다. 계정
-          관리·태블릿 연결·전체 백업은 운영자 전용입니다. 계정 수정 시 기존
+          관리·태블릿 연결·전체 백업은 개발자 전용입니다. 계정 수정 시 기존
           로그인은 해제됩니다.
         </p>
       </Help>
+    </ActionForm>
+  );
+}
+export function ProfileForm() {
+  const { admin, mutate } = useAdmin();
+  return (
+    <ActionForm
+      submit={(form) =>
+        mutate(
+          "/admin/profile",
+          { name: form.get("name"), expectedName: admin.name },
+          "PATCH",
+        )
+      }
+    >
+      <Field label="표시 이름">
+        <input
+          name="name"
+          defaultValue={admin.name}
+          required
+          maxLength={100}
+          autoComplete="name"
+        />
+      </Field>
+      <p className="small muted">아이디·권한·비밀번호·로그인은 유지됩니다.</p>
     </ActionForm>
   );
 }

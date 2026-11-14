@@ -78,7 +78,7 @@ export async function inspectSnapshot(input: unknown) {
       (admin) => admin.active === 1 && admin.role === "owner",
     )
   )
-    throw new Error("활성 운영자 계정이 없는 백업입니다.");
+    throw new Error("활성 개발자 계정이 없는 백업입니다.");
   return {
     createdAt: snapshot.created_at,
     employees: snapshot.tables.employees.length,

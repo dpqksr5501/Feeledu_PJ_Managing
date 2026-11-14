@@ -44,6 +44,7 @@ import SettingsPage, { BackupForm } from "./SettingsPage.tsx";
 import WeeklyAttendance from "./WeeklyAttendance.tsx";
 import { UpdateHistoryButton } from "../UpdateCenter.tsx";
 import { holidayName, workedDates } from "../../shared/workdays.ts";
+import { adminRoleLabel } from "../../shared/admin-role.ts";
 
 const navigation = [
   { id: "overview", label: "대시보드", icon: LayoutDashboard },
@@ -54,7 +55,7 @@ const navigation = [
   { id: "settings", label: "설정", icon: Settings2 },
 ];
 const actionLabels: Record<string, string> = {
-  setup: "운영자 설정",
+  setup: "개발자 설정",
   login: "로그인",
   "employee.create": "직원 등록",
   "employee.update": "직원 수정",
@@ -79,6 +80,7 @@ const actionLabels: Record<string, string> = {
   "settlement.create": "정산 확정",
   "account.create": "관리자 등록",
   "account.update": "관리자 변경",
+  "profile.update": "내 이름 변경",
   "password.change": "비밀번호 변경",
   "device.pairing": "연결 코드 발급",
   "device.paired": "태블릿 연결",
@@ -90,10 +92,12 @@ export default function AdminApp({
   admin,
   expired,
   logout,
+  changed,
 }: {
   admin: Admin;
   expired: () => void;
   logout: () => Promise<void>;
+  changed: (admin: Admin) => void;
 }) {
   const today = seoulDate();
   const [from, setFrom] = useState(today.slice(0, 8) + "01");
@@ -151,10 +155,11 @@ export default function AdminApp({
   }, [notice]);
   async function mutate(path: string, body?: unknown, method = "POST") {
     try {
-      await api(path, {
+      const result = await api<Admin>(path, {
         method,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
+      if (path === "/admin/profile") changed(result);
       refresh(resourcesAfterMutation(path));
       setNotice({ text: "저장 완료", error: false });
       return true;
@@ -445,11 +450,19 @@ export default function AdminApp({
       const showYear =
         from.slice(0, 4) !== to.slice(0, 4) ||
         date.slice(0, 4) !== from.slice(0, 4);
+      const holiday = data?.holidays.find((item) => item.date === date);
+      const tone =
+        holiday || weekday(date) === 0
+          ? "red"
+          : weekday(date) === 6
+            ? "blue"
+            : "";
       return (
         <time
           dateTime={date}
-          title={`${date}(${day})`}
-          aria-label={`${date}(${day})`}
+          className={tone ? `calendar-date-${tone}` : undefined}
+          title={`${date}(${day})${holiday ? " · " + holiday.name : ""}`}
+          aria-label={`${date}(${day})${holiday ? " · " + holiday.name : ""}`}
         >
           {showYear ? date : date.slice(5)}({day})
         </time>
@@ -618,7 +631,7 @@ export default function AdminApp({
           <span className="avatar">{admin.name.slice(0, 1)}</span>
           <div>
             <strong>{admin.name}</strong>
-            <small>{admin.role === "owner" ? "운영자" : "학원 관리자"}</small>
+            <small>{adminRoleLabel(admin.role)}</small>
           </div>
           <button
             aria-label="로그아웃"

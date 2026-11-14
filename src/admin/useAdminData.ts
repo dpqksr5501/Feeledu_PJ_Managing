@@ -55,6 +55,7 @@ export function resourcesAfterMutation(
   if (path.startsWith("/admin/settlements"))
     return ["settlements", "payroll", "audit"];
   if (path.startsWith("/admin/accounts")) return ["accounts", "audit"];
+  if (path === "/admin/profile") return ["accounts", "audit"];
   if (/^\/admin\/(devices|pairings)/.test(path)) return ["devices", "audit"];
 }
 export function useAdminData({

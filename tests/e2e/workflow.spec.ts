@@ -26,7 +26,7 @@ test("operator administration, paired tablet, offline reload and manager access"
   admin.on("pageerror", (error) => errors.push(error.message));
   await admin.goto("/");
   await admin.getByLabel("초기 설정 코드").fill("test-only-setup-token");
-  await admin.getByLabel("운영자 이름").fill("테스트 운영자");
+  await admin.getByLabel("개발자 이름").fill("테스트 운영자");
   await admin.getByLabel("아이디", { exact: true }).fill("qa-owner");
   const initialPassword = admin.getByLabel("비밀번호", { exact: true });
   await initialPassword.fill("abcdefghij");
@@ -40,7 +40,7 @@ test("operator administration, paired tablet, offline reload and manager access"
     (response) =>
       new URL(response.url()).pathname === "/api/admin/attendance-week",
   );
-  await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
+  await admin.getByRole("button", { name: "개발자 계정 만들기" }).click();
   await expect(
     admin.getByRole("heading", { name: "대시보드", exact: true }),
   ).toBeVisible();
@@ -918,6 +918,99 @@ test("operator administration, paired tablet, offline reload and manager access"
   expect(csvContent).toContain("야간시간");
   expect(csvContent).toContain("야간가산");
   expect(csvContent).toContain("21046");
+  // Calendar colours use official/manual dates, independent of payroll weekday multipliers.
+  for (const date of ["2026-11-02", "2026-11-07", "2026-11-08"]) {
+    expect(
+      (
+        await adminContext.request.post("/api/admin/records", {
+          headers: { "X-Requested-With": "Feeledu" },
+          data: {
+            employee_id: nightId,
+            started_at: date + "T09:00:00+09:00",
+            ended_at: date + "T10:00:00+09:00",
+            break_minutes: 0,
+            note: "",
+            reason: "달력 색상 검증",
+          },
+        })
+      ).status(),
+    ).toBe(201);
+  }
+  await admin.route("**/api/admin/holidays", async (route) => {
+    const response = await route.fetch(),
+      holidays = await response.json();
+    await route.fulfill({
+      response,
+      json: [
+        ...holidays,
+        {
+          id: "kasi:2026-11-02",
+          date: "2026-11-02",
+          name: "임시공휴일",
+          source: "official",
+        },
+        {
+          id: "kasi:2026-11-07",
+          date: "2026-11-07",
+          name: "대체공휴일",
+          source: "official",
+        },
+      ],
+    });
+  });
+  await admin.getByRole("button", { name: "근무기록", exact: true }).click();
+  await admin.getByRole("button", { name: "새로고침", exact: true }).click();
+  const calendarRows = admin.getByRole("row").filter({ hasText: "야간 검증" });
+  await expect(calendarRows.locator('time[datetime="2026-10-31"]')).toHaveCSS(
+    "color",
+    "rgb(21, 95, 192)",
+  );
+  for (const date of ["2026-11-01", "2026-11-02", "2026-11-07", "2026-11-08"])
+    await expect(calendarRows.locator(`time[datetime="${date}"]`)).toHaveCSS(
+      "color",
+      "rgb(197, 22, 35)",
+    );
+  await expect(
+    calendarRows.locator('time[datetime="2026-11-07"]'),
+  ).toHaveAttribute("title", /대체공휴일/);
+  await expect(
+    calendarRows.locator('time[datetime="2026-11-02"]'),
+  ).toHaveAttribute("title", /임시공휴일/);
+  await admin.screenshot({
+    path: ".tmp/qa-calendar-record-colors.png",
+    fullPage: true,
+  });
+  const accountsBefore = await (
+    await adminContext.request.get("/api/admin/accounts")
+  ).json();
+  await admin.getByRole("button", { name: "설정", exact: true }).click();
+  await expect(admin.locator(".sidebar-user small")).toHaveText("개발자");
+  await admin.getByRole("button", { name: "이름 변경", exact: true }).click();
+  dialog = admin.getByRole("dialog");
+  await dialog.getByLabel("표시 이름", { exact: true }).fill("개발자_QA");
+  await dialog.getByRole("button", { name: "저장하기", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(admin.locator(".sidebar-user strong")).toHaveText("개발자_QA");
+  const currentProfile = await (
+    await adminContext.request.get("/api/admin/me")
+  ).json();
+  expect(currentProfile).toMatchObject({
+    name: "개발자_QA",
+    role: "owner",
+    persistent_login: 1,
+  });
+  const accountsAfter = await (
+    await adminContext.request.get("/api/admin/accounts")
+  ).json();
+  expect(
+    accountsAfter.filter((row: { role: string }) => row.role === "manager"),
+  ).toEqual(
+    accountsBefore.filter((row: { role: string }) => row.role === "manager"),
+  );
+  await admin.screenshot({
+    path: ".tmp/qa-developer-profile.png",
+    fullPage: true,
+  });
   expect(errors).toEqual([]);
   await managerContext.close();
   await kioskContext.close();

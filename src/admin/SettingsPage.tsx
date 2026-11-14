@@ -16,7 +16,8 @@ import type { Policy } from "../../shared/types.ts";
 import { api, ApiError } from "../api.ts";
 import { Alert, Empty, Field, Help } from "../ui.tsx";
 import { useAdmin } from "./context.tsx";
-import { AccountForm, PasswordForm } from "./forms.tsx";
+import { AccountForm, PasswordForm, ProfileForm } from "./forms.tsx";
+import { adminRoleLabel } from "../../shared/admin-role.ts";
 import HolidayCalendarPanel from "./HolidayCalendarPanel.tsx";
 
 export default function SettingsPage() {
@@ -148,16 +149,23 @@ export default function SettingsPage() {
           <div>
             <h2>내 계정 보안</h2>
             <p>
-              {admin.name} · {admin.username} ·{" "}
-              {admin.role === "owner" ? "운영자" : "학원 관리자"}
+              {admin.name} · {admin.username} · {adminRoleLabel(admin.role)}
             </p>
           </div>
-          <button
-            className="button secondary"
-            onClick={() => open("내 비밀번호 변경", <PasswordForm />)}
-          >
-            <KeyRound size={16} /> 비밀번호 변경
-          </button>
+          <div className="row">
+            <button
+              className="button secondary"
+              onClick={() => open("내 이름 변경", <ProfileForm />)}
+            >
+              이름 변경
+            </button>
+            <button
+              className="button secondary"
+              onClick={() => open("내 비밀번호 변경", <PasswordForm />)}
+            >
+              <KeyRound size={16} /> 비밀번호 변경
+            </button>
+          </div>
         </div>
       </section>
       {admin.role === "owner" && (
@@ -192,7 +200,7 @@ export default function SettingsPage() {
                         <b>{a.name}</b>
                       </td>
                       <td>{a.username}</td>
-                      <td>{a.role === "owner" ? "운영자" : "학원 관리자"}</td>
+                      <td>{adminRoleLabel(a.role)}</td>
                       <td>
                         <span className={`badge ${a.active ? "green" : ""}`}>
                           {a.active ? "활성" : "비활성"}
@@ -408,7 +416,7 @@ function BackupPanel() {
             } catch (err) {
               setError(
                 err instanceof Error &&
-                  /검사값|활성 운영자|50MB/.test(err.message)
+                  /검사값|활성 (운영자|개발자)|50MB/.test(err.message)
                   ? err.message
                   : "올바른 필에듀 JSON 백업 파일을 선택해 주세요.",
               );
