@@ -82,6 +82,17 @@ test("an installed shell preserves its offline queue across a safe idle update",
       db.close();
     });
     const metadata = JSON.parse(readFileSync("dist/app-release.json", "utf8"));
+    // Fixed-name assets in a retained older cache must not override a new build.
+    await page.evaluate(async (revision) => {
+      const cache = await caches.open("feeledu-" + revision);
+      const asset = (await cache.match("/brand/feeledu-logo.png"))!;
+      const headers = new Headers(asset.headers);
+      headers.set("X-QA-Old-Logo", "1");
+      await cache.put(
+        "/brand/feeledu-logo.png",
+        new Response(await asset.arrayBuffer(), { headers }),
+      );
+    }, metadata.revision);
     const revision = randomUUID().replaceAll("-", "").slice(0, 16);
     const notes = [2, 1].map((number) => ({
       id: "qa-update-" + number,
@@ -227,6 +238,11 @@ test("an installed shell preserves its offline queue across a safe idle update",
       return value;
     });
     expect(marker).toBe("preserve-this");
+    expect(
+      await page.evaluate(async () =>
+        (await fetch("/brand/feeledu-logo.png")).headers.get("X-QA-Old-Logo"),
+      ),
+    ).toBeNull();
   } finally {
     writeFileSync("dist/sw.js", original);
   }

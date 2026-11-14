@@ -36,6 +36,6 @@ self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise
 self.addEventListener('fetch',e=>{const url=new URL(e.request.url);if(e.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/')||url.pathname.startsWith('/downloads/'))return;
 if(url.pathname==='/app-release.json'&&e.request.cache==='no-store')return;
 if(e.request.mode==='navigate'){e.respondWith(fetch(e.request).catch(()=>caches.match('/')));return;}
-e.respondWith(caches.match(e.request).then(cached=>cached||fetch(e.request)));});`,
+e.respondWith((async()=>{const cached=await(await caches.open(CACHE)).match(e.request);return cached||await caches.match(e.request)||fetch(e.request)})());});`,
 );
 console.log("Offline app shell generated:", revision);

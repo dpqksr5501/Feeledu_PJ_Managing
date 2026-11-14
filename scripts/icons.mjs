@@ -27,5 +27,5 @@ try {
 }
 writeFileSync(
   new URL("../public/icon.svg", import.meta.url),
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" fill="white"/><image href="data:image/png;base64,${data}" x="40" y="157" width="432" height="198"/></svg>`,
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><image href="data:image/png;base64,${readFileSync(new URL("../public/icon-512.png", import.meta.url)).toString("base64")}" width="512" height="512"/></svg>`,
 );

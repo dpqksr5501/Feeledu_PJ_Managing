@@ -13,6 +13,15 @@ export type AppRelease = {
 // Newest first. Keep IDs stable so skipped versions can be acknowledged together.
 export const appReleases: ReleaseNote[] = [
   {
+    id: "2026-11-14.5",
+    date: "2026-11-14",
+    title: "투명 PNG 로고 적용",
+    changes: [
+      "관리자·출퇴근·로그인·다운로드 화면과 웹 아이콘에 새 PNG 로고를 적용했습니다.",
+      "작은 화면에서 로고가 잘리지 않도록 맞추고, 업데이트 후 최신 로고를 우선 표시하도록 캐시를 개선했습니다.",
+    ],
+  },
+  {
     id: "2026-11-14.4",
     date: "2026-11-14",
     title: "휴일 색상·앱 안내·계정 표시",

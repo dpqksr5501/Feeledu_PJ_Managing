@@ -1811,12 +1811,9 @@ td strong {
   border-radius: 8px;
 }
 .brand-compact img {
-  position: absolute;
-  width: 102px;
-  height: auto;
-  max-width: none;
-  left: -49px;
-  top: -4px;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .auth-card > .brand {
   width: 180px;

@@ -142,12 +142,12 @@ export function Brand() {
       <img
         className="brand-wordmark"
         src="/brand/feeledu-logo.png"
-        width="281"
-        height="129"
+        width="1851"
+        height="849"
         alt="FEEL EDU"
       />
       <span className="brand-compact" aria-hidden="true">
-        <img src="/brand/feeledu-logo.png" width="281" height="129" alt="" />
+        <img src="/icon-192.png" width="42" height="42" alt="" />
       </span>
     </div>
   );
