@@ -24,6 +24,7 @@ import {
   hours,
   money,
   seoulDate,
+  weekday,
 } from "../../shared/time.ts";
 import { api, ApiError, download } from "../api.ts";
 import { Alert, Brand, Empty, Help, Loading, Modal } from "../ui.tsx";
@@ -438,6 +439,22 @@ export default function AdminApp({
     </div>
   );
   function recordTable(items: Shift[], compact = false) {
+    const recordDate = (instant: string) => {
+      const date = seoulDate(instant);
+      const day = ["일", "월", "화", "수", "목", "금", "토"][weekday(date)];
+      const showYear =
+        from.slice(0, 4) !== to.slice(0, 4) ||
+        date.slice(0, 4) !== from.slice(0, 4);
+      return (
+        <time
+          dateTime={date}
+          title={`${date}(${day})`}
+          aria-label={`${date}(${day})`}
+        >
+          {showYear ? date : date.slice(5)}({day})
+        </time>
+      );
+    };
     return (
       <div className="table-wrap">
         <table>
@@ -467,7 +484,7 @@ export default function AdminApp({
                   </span>
                 </td>
                 <td>
-                  {seoulDate(s.started_at)}
+                  {recordDate(s.started_at)}
                   {!compact &&
                     holidayDates(s).map((date) => (
                       <small key={date} className="cell-note">
@@ -489,7 +506,7 @@ export default function AdminApp({
                     <>
                       {seoulDate(s.ended_at) !== seoulDate(s.started_at) && (
                         <small className="date-prefix">
-                          {seoulDate(s.ended_at)}{" "}
+                          {recordDate(s.ended_at)}{" "}
                         </small>
                       )}
                       {formatTime(s.ended_at)}

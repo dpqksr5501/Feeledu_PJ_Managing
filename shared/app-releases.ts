@@ -13,6 +13,15 @@ export type AppRelease = {
 // Newest first. Keep IDs stable so skipped versions can be acknowledged together.
 export const appReleases: ReleaseNote[] = [
   {
+    id: "2026-11-14.3",
+    date: "2026-11-14",
+    title: "근무일 요일 표시",
+    changes: [
+      "근무기록의 근무일과 다음 날 퇴근 날짜에 요일을 표시합니다.",
+      "같은 연도는 11-13(금)처럼 간단하게, 연도를 넘는 조회는 연도도 함께 표시합니다.",
+    ],
+  },
+  {
     id: "2026-11-14.2",
     date: "2026-11-14",
     title: "야간수당·실제 휴게 구간",
