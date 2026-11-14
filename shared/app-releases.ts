@@ -13,6 +13,14 @@ export type AppRelease = {
 // Newest first. Keep IDs stable so skipped versions can be acknowledged together.
 export const appReleases: ReleaseNote[] = [
   {
+    id: "2026-11-14.6",
+    date: "2026-11-14",
+    title: "연결 기기 이름 변경",
+    changes: [
+      "연결을 해제하거나 재등록하지 않고 기기의 표시 이름만 바꿀 수 있습니다. 출퇴근 기록과 연결은 유지됩니다.",
+    ],
+  },
+  {
     id: "2026-11-14.5",
     date: "2026-11-14",
     title: "투명 PNG 로고 적용",

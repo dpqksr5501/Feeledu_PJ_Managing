@@ -1011,6 +1011,29 @@ test("operator administration, paired tablet, offline reload and manager access"
     path: ".tmp/qa-developer-profile.png",
     fullPage: true,
   });
+  const deviceBefore = (
+    await (await adminContext.request.get("/api/admin/devices")).json()
+  )[0];
+  await admin
+    .getByRole("button", { name: "기기 이름 변경", exact: true })
+    .first()
+    .click();
+  dialog = admin.getByRole("dialog");
+  await dialog.getByLabel("기기 이름", { exact: true }).fill("연결 유지 검증");
+  await dialog.getByRole("button", { name: "저장하기", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(
+    admin.getByRole("cell", { name: "연결 유지 검증", exact: true }),
+  ).toBeVisible();
+  const deviceAfter = (
+    await (await adminContext.request.get("/api/admin/devices")).json()
+  ).find((row: { id: string }) => row.id === deviceBefore.id);
+  expect(deviceAfter).toMatchObject({
+    id: deviceBefore.id,
+    name: "연결 유지 검증",
+    active: deviceBefore.active,
+    created_at: deviceBefore.created_at,
+  });
   expect(errors).toEqual([]);
   await managerContext.close();
   await kioskContext.close();

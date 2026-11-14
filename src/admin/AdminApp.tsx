@@ -85,6 +85,7 @@ const actionLabels: Record<string, string> = {
   "device.pairing": "연결 코드 발급",
   "device.paired": "태블릿 연결",
   "device.revoke": "태블릿 연결 해제",
+  "device.rename": "기기 이름 변경",
   "backup.download": "백업 다운로드",
   "testdata.cleanup": "테스트 데이터 정리",
 };

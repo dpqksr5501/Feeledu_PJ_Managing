@@ -16,7 +16,12 @@ import type { Policy } from "../../shared/types.ts";
 import { api, ApiError } from "../api.ts";
 import { Alert, Empty, Field, Help } from "../ui.tsx";
 import { useAdmin } from "./context.tsx";
-import { AccountForm, PasswordForm, ProfileForm } from "./forms.tsx";
+import {
+  AccountForm,
+  PasswordForm,
+  ProfileForm,
+  DeviceNameForm,
+} from "./forms.tsx";
 import { adminRoleLabel } from "../../shared/admin-role.ts";
 import HolidayCalendarPanel from "./HolidayCalendarPanel.tsx";
 
@@ -301,6 +306,17 @@ export default function SettingsPage() {
                             : "접속 기록 없음"}
                         </td>
                         <td>
+                          <button
+                            className="text-button"
+                            onClick={() =>
+                              open(
+                                "기기 이름 변경",
+                                <DeviceNameForm device={d} />,
+                              )
+                            }
+                          >
+                            기기 이름 변경
+                          </button>{" "}
                           {!!d.active && (
                             <button
                               className="text-button danger"

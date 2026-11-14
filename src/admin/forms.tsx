@@ -7,6 +7,7 @@ import {
 import type {
   Admin,
   Employee,
+  Device,
   Shift,
   ShiftBreak,
   ReviewEvent,
@@ -837,6 +838,30 @@ export function AccountForm({ account }: { account?: Admin }) {
           로그인은 해제됩니다.
         </p>
       </Help>
+    </ActionForm>
+  );
+}
+export function DeviceNameForm({ device }: { device: Device }) {
+  const { mutate } = useAdmin();
+  return (
+    <ActionForm
+      submit={(form) =>
+        mutate(
+          `/admin/devices/${device.id}`,
+          { name: form.get("name"), expectedName: device.name },
+          "PATCH",
+        )
+      }
+    >
+      <Field label="기기 이름">
+        <input
+          name="name"
+          defaultValue={device.name}
+          required
+          maxLength={100}
+        />
+      </Field>
+      <p className="small muted">연결·출퇴근 기록은 유지됩니다.</p>
     </ActionForm>
   );
 }

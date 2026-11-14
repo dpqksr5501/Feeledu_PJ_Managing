@@ -1331,6 +1331,28 @@ export function registerRoutes(
         .all(),
     ),
   );
+  admin.patch("/devices/:id", owner, (req: Authed, res) => {
+    const id = idSchema.parse(req.params.id);
+    const body = z
+      .object({ name: text, expectedName: text })
+      .strict()
+      .parse(req.body);
+    transaction(db, () => {
+      const device =
+        one<{ name: string }>(db, "SELECT name FROM devices WHERE id=?", id) ||
+        fail(404, "기기를 찾을 수 없습니다.");
+      if (device.name !== body.expectedName)
+        fail(409, "기기 이름이 변경됐습니다. 새로고침 후 다시 확인해 주세요.");
+      if (device.name !== body.name) {
+        db.prepare("UPDATE devices SET name=? WHERE id=?").run(body.name, id);
+        audit(db, req.admin!.id, "device.rename", id, {
+          before: device.name,
+          after: body.name,
+        });
+      }
+    });
+    res.json({ ok: true });
+  });
   admin.post("/pairings", owner, (req: Authed, res) => {
     const body = z.object({ name: text }).parse(req.body);
     const code = String(randomInt(10000000, 100000000));
