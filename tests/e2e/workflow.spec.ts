@@ -45,6 +45,10 @@ test("operator administration, paired tablet, offline reload and manager access"
     admin.getByRole("heading", { name: "대시보드", exact: true }),
   ).toBeVisible();
   await initialWeek;
+  await expect(admin.locator(".brand")).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
   expect(dataReads).toEqual([
     "/api/admin/settings",
     "/api/admin/attendance-week",
@@ -695,6 +699,15 @@ test("operator administration, paired tablet, offline reload and manager access"
     fullPage: true,
   });
   await admin.setViewportSize({ width: 800, height: 1280 });
+  await expect(admin.locator(".brand-compact")).toBeVisible();
+  await expect(admin.locator(".brand-compact")).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  await expect(admin.locator(".brand-compact img")).toHaveAttribute(
+    "src",
+    "/brand/feeledu-logo.png",
+  );
   expect(
     await admin.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

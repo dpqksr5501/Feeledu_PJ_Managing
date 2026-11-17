@@ -147,7 +147,7 @@ export function Brand() {
         alt="FEEL EDU"
       />
       <span className="brand-compact" aria-hidden="true">
-        <img src="/icon-192.png" width="42" height="42" alt="" />
+        <img src="/brand/feeledu-logo.png" width="42" height="42" alt="" />
       </span>
     </div>
   );

@@ -206,8 +206,6 @@ textarea {
   align-items: center;
   width: 152px;
   max-width: 100%;
-  background: #fff;
-  border-radius: 8px;
   flex-shrink: 0;
 }
 .avatar {
@@ -1807,7 +1805,6 @@ td strong {
   width: 42px;
   height: 42px;
   overflow: hidden;
-  background: #fff;
   border-radius: 8px;
 }
 .brand-compact img {
