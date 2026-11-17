@@ -13,6 +13,16 @@ export type AppRelease = {
 // Newest first. Keep IDs stable so skipped versions can be acknowledged together.
 export const appReleases: ReleaseNote[] = [
   {
+    id: "2026-11-17.1",
+    date: "2026-11-17",
+    title: "출퇴근 화면 안내·오프라인 재실행 개선",
+    changes: [
+      "기기나 실행 방식에 관계없이 출퇴근 화면의 앱 다운로드 안내를 제거했습니다. 설치는 기존 다운로드 페이지와 GitHub 릴리즈에서 할 수 있습니다.",
+      "오프라인 재실행 시 현재 버전의 화면 캐시를 사용하도록 수정했습니다.",
+      "앱 실행 정보가 사라지는 재실행과 오프라인 업데이트 후 재접속을 추가 검증했습니다. 출퇴근 대기 기록과 연결은 유지됩니다.",
+    ],
+  },
+  {
     id: "2026-11-14.6",
     date: "2026-11-14",
     title: "연결 기기 이름 변경",

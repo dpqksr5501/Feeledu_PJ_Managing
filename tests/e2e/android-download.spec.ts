@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 
-test("installed TWA hides the download promotion across reloads while a normal Android browser keeps it", async ({
+test("kiosk never promotes installation after app referrer loss, browser reload or offline relaunch", async ({
   page,
 }) => {
   await page.setExtraHTTPHeaders({
@@ -11,13 +11,29 @@ test("installed TWA hides the download promotion across reloads while a normal A
   });
   await page.goto("/kiosk");
   await expect(
-    page.getByRole("link", { name: "앱 다운로드", exact: true }),
+    page.getByRole("heading", { name: "태블릿 연결", exact: true }),
   ).toBeVisible();
-  await page.addInitScript(() =>
+  await expect(
+    page.getByRole("link", { name: "앱 다운로드", exact: true }),
+  ).toHaveCount(0);
+  await page.addInitScript(() => {
+    const firstAppLaunch =
+      sessionStorage.getItem("qa-native-launch") !== "seen";
+    sessionStorage.setItem("qa-native-launch", "seen");
     Object.defineProperty(document, "referrer", {
       configurable: true,
-      get: () => "android-app://kr.feeledu.attendance/",
-    }),
+      get: () => (firstAppLaunch ? "android-app://kr.feeledu.attendance/" : ""),
+    });
+  });
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "태블릿 연결", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "앱 다운로드", exact: true }),
+  ).toHaveCount(0);
+  expect(await page.evaluate(() => document.referrer)).toBe(
+    "android-app://kr.feeledu.attendance/",
   );
   await page.reload();
   await expect(
@@ -26,13 +42,22 @@ test("installed TWA hides the download promotion across reloads while a normal A
   await expect(
     page.getByRole("link", { name: "앱 다운로드", exact: true }),
   ).toHaveCount(0);
-  await page.reload();
-  await expect(
-    page.getByRole("heading", { name: "태블릿 연결", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "앱 다운로드", exact: true }),
-  ).toHaveCount(0);
+  expect(await page.evaluate(() => document.referrer)).toBe("");
+  await expect
+    .poll(() => page.evaluate(() => !!navigator.serviceWorker.controller))
+    .toBe(true);
+  await page.context().setOffline(true);
+  try {
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: "태블릿 연결", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "앱 다운로드", exact: true }),
+    ).toHaveCount(0);
+  } finally {
+    await page.context().setOffline(false);
+  }
 });
 
 test("Chrome finishes the first-party APK download and HTTP byte ranges resume the same file", async ({

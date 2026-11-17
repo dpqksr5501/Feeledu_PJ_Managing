@@ -36,9 +36,9 @@ test("an installed shell preserves its offline queue across a safe idle update",
     });
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto("/kiosk");
-    await expect(
-      page.getByRole("link", { name: "앱 다운로드" }),
-    ).toHaveAttribute("href", "/download");
+    await expect(page.getByRole("link", { name: "앱 다운로드" })).toHaveCount(
+      0,
+    );
     await expect
       .poll(() => page.evaluate(() => !!navigator.serviceWorker.controller), {
         timeout: 15000,
@@ -91,6 +91,19 @@ test("an installed shell preserves its offline queue across a safe idle update",
       await cache.put(
         "/brand/feeledu-logo.png",
         new Response(await asset.arrayBuffer(), { headers }),
+      );
+      const shell = (await cache.match("/"))!;
+      const shellHeaders = new Headers(shell.headers);
+      shellHeaders.delete("content-length");
+      await cache.put(
+        "/",
+        new Response(
+          (await shell.text()).replace(
+            "<head>",
+            '<head><meta name="qa-old-shell" content="1">',
+          ),
+          { headers: shellHeaders },
+        ),
       );
     }, metadata.revision);
     const revision = randomUUID().replaceAll("-", "").slice(0, 16);
@@ -243,6 +256,28 @@ test("an installed shell preserves its offline queue across a safe idle update",
         (await fetch("/brand/feeledu-logo.png")).headers.get("X-QA-Old-Logo"),
       ),
     ).toBeNull();
+    await page.context().setOffline(true);
+    try {
+      await page.reload();
+      await expect(
+        page.getByRole("heading", { name: "태블릿 연결", exact: true }),
+      ).toBeVisible();
+      await expect(page.locator('meta[name="qa-old-shell"]')).toHaveCount(0);
+      await expect(
+        page.getByRole("link", { name: "앱 다운로드", exact: true }),
+      ).toHaveCount(0);
+      expect(
+        await page.evaluate(
+          async (revision) =>
+            !!(await caches
+              .open("feeledu-" + revision)
+              .then((cache) => cache.match("/"))),
+          metadata.revision,
+        ),
+      ).toBe(true);
+    } finally {
+      await page.context().setOffline(false);
+    }
   } finally {
     writeFileSync("dist/sw.js", original);
   }
