@@ -7,6 +7,8 @@ import { calculatePayroll } from "../../server/payroll.ts";
 import { overlappingShift, shiftRangeSql } from "../../server/shift-query.ts";
 import { HolidayCalendarService } from "../../server/holiday-calendar.ts";
 import { attachShiftBreaks } from "../../server/shift-breaks.ts";
+import { employeeDirectory } from "../../server/employees.ts";
+import { employeeJobAssignments } from "../../server/jobs.ts";
 
 export class QueryBenchmark extends DurableObject {
   async fetch() {
@@ -45,7 +47,8 @@ export class QueryBenchmark extends DurableObject {
     });
     const measure = (legacy) => {
       let reads = 0,
-        writes = 0;
+        writes = 0,
+        queries = 0;
       const measuredDb = {
         ...db,
         prepare(query) {
@@ -55,7 +58,10 @@ export class QueryBenchmark extends DurableObject {
                 query = "SELECT * FROM rates ORDER BY effective_from";
                 args = [];
               }
-              if (legacy && query.includes("SELECT * FROM day_rates WHERE")) {
+              if (
+                legacy &&
+                query.includes("SELECT * FROM day_rates WHERE date BETWEEN")
+              ) {
                 query = "SELECT * FROM day_rates ORDER BY date";
                 args = [];
               }
@@ -73,6 +79,7 @@ export class QueryBenchmark extends DurableObject {
               }
               const cursor = sql.exec(query, ...args);
               const result = cursor.toArray();
+              queries++;
               reads += cursor.rowsRead;
               writes += cursor.rowsWritten;
               return result;
@@ -86,8 +93,9 @@ export class QueryBenchmark extends DurableObject {
       const run = (fn) => {
         reads = 0;
         writes = 0;
+        queries = 0;
         const value = fn();
-        return { reads, writes, value };
+        return { reads, writes, queries, value };
       };
       return {
         overlap: run(() =>
@@ -145,10 +153,48 @@ export class QueryBenchmark extends DurableObject {
             )
             .all(),
         ),
+        directory: run(() => {
+          const today = "2026-11-10";
+          if (!legacy) return employeeDirectory(measuredDb, today);
+          return measuredDb
+            .prepare(
+              `SELECT e.*,COALESCE((SELECT hourly_rate FROM day_rates d WHERE d.employee_id=e.id AND d.date=?),
+              (SELECT hourly_rate FROM rates r WHERE r.employee_id=e.id AND r.effective_from<=? ORDER BY effective_from DESC LIMIT 1)) AS current_rate
+              FROM employees e ORDER BY active DESC,name`,
+            )
+            .all(today, today)
+            .map((employee) => {
+              const rates = measuredDb
+                .prepare(
+                  "SELECT * FROM rates WHERE employee_id=? ORDER BY effective_from DESC",
+                )
+                .all(employee.id);
+              const day_rates = measuredDb
+                .prepare(
+                  "SELECT * FROM day_rates WHERE employee_id=? ORDER BY date DESC",
+                )
+                .all(employee.id);
+              const jobs = employeeJobAssignments(measuredDb, employee.id);
+              const jobRates = measuredDb
+                .prepare(
+                  "SELECT * FROM job_rates WHERE employee_id=? ORDER BY date DESC",
+                )
+                .all(employee.id);
+              return {
+                ...employee,
+                rates,
+                day_rates,
+                jobs: jobs.map((job) => ({
+                  ...job,
+                  rates: jobRates.filter((rate) => rate.job_id === job.id),
+                })),
+              };
+            });
+        }),
       };
     };
     db.exec(
-      "DROP INDEX shifts_end; DROP INDEX shifts_employee_end; DROP INDEX clock_pending; DROP INDEX clock_pending_by_employee; DROP INDEX audit_recent; DROP INDEX audit_action_recent; DROP INDEX adjustments_date; DROP INDEX day_rates_date; DROP INDEX rates_effective;",
+      "DROP INDEX shifts_end; DROP INDEX shifts_employee_end; DROP INDEX clock_pending; DROP INDEX clock_pending_by_employee; DROP INDEX clock_pending_by_device; DROP INDEX audit_recent; DROP INDEX audit_action_recent; DROP INDEX adjustments_date; DROP INDEX day_rates_date; DROP INDEX rates_effective;",
     );
     const before = measure(true);
     initializeDb(db);

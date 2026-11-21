@@ -13,6 +13,16 @@ export type AppRelease = {
 // Newest first. Keep IDs stable so skipped versions can be acknowledged together.
 export const appReleases: ReleaseNote[] = [
   {
+    id: "2026-11-21.2",
+    date: "2026-11-21",
+    title: "출퇴근 동기화와 조회 개선",
+    changes: [
+      "충돌 기록은 태블릿에 보관하고 다른 직원의 출퇴근은 계속 전송합니다.",
+      "같은 복구 파일을 다시 올릴 때 중복 기기와 작업 이력이 생기지 않습니다.",
+      "직원별 시급·직무 조회와 급여 계산에서 반복 읽기를 줄였습니다.",
+    ],
+  },
+  {
     id: "2026-11-21.1",
     date: "2026-11-21",
     title: "직원별 근무 직무와 시급",

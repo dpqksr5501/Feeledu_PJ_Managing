@@ -5,11 +5,11 @@ import { paidMillisecondsInRange } from "../shared/shift-duration.ts";
 import { holidayName } from "../shared/workdays.ts";
 import { getHolidays } from "./holidays.ts";
 import { attachShiftBreaks } from "./shift-breaks.ts";
+import { groupRows } from "./group-rows.ts";
 import type {
   AttendanceDay,
   Employee,
   EmployeeAttendance,
-  Holiday,
   Shift,
   WeeklyAttendance,
 } from "../shared/types.ts";
@@ -51,6 +51,7 @@ export function attendanceWeek(
       "SELECT employee_id,COUNT(*) AS n FROM clock_events WHERE status='pending' AND captured_at>=? AND captured_at<? GROUP BY employee_id",
     )
     .all(new Date(begin).toISOString(), new Date(finish).toISOString());
+  const shiftsByEmployee = groupRows(shifts, (shift) => shift.employee_id);
   const employees = (
     db
       .prepare("SELECT * FROM employees ORDER BY name,id")
@@ -60,7 +61,7 @@ export function attendanceWeek(
       const days = newDays(),
         warnings: string[] = [];
       let workingSince: string | null = null;
-      for (const shift of shifts.filter((s) => s.employee_id === employee.id)) {
+      for (const shift of shiftsByEmployee.get(employee.id) ?? []) {
         const start = Date.parse(shift.started_at),
           end = shift.ended_at ? Date.parse(shift.ended_at) : now;
         if (!shift.ended_at) workingSince = shift.started_at;
@@ -78,7 +79,11 @@ export function attendanceWeek(
           warnings.push(shift.ended_at ? "근무시간 확인" : "퇴근 확인 필요");
           continue;
         }
-        if (shift.break_minutes * 60000 >= end - start) {
+        if (
+          !Number.isInteger(shift.break_minutes) ||
+          shift.break_minutes < 0 ||
+          shift.break_minutes * 60000 >= end - start
+        ) {
           warnings.push("휴게시간 확인");
           continue;
         }

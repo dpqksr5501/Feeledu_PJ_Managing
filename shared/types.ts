@@ -67,6 +67,7 @@ export type ClockResult = {
   status: "accepted" | "pending" | "rejected";
   review_reason: string;
   shift_id: string | null;
+  open_shift?: { id: string; job: Job } | null;
 };
 export type ReviewEvent = {
   id: string;
@@ -169,6 +170,7 @@ export type Payroll = {
     total: number;
     created_at: string;
     created_by_name: string;
+    fingerprint?: string;
     snapshot: Payroll;
   } | null;
   difference: number | null;

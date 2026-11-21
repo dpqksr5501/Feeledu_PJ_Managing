@@ -422,6 +422,18 @@ describe("API integrity and permissions", () => {
     ).toBe(409);
     expect((await f.request("/admin/reviews")).data).toHaveLength(1);
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM shifts").get()!.n).toBe(0);
+    expect(
+      f.db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM devices WHERE name='관리자 복구 파일'",
+        )
+        .get()!.n,
+    ).toBe(1);
+    expect(
+      f.db
+        .prepare("SELECT COUNT(*) AS n FROM audit WHERE action='clock.recover'")
+        .get()!.n,
+    ).toBe(1);
   });
   test("protects employee and policy edits against stale administrator forms", async () => {
     await f.employee();
@@ -620,6 +632,45 @@ describe("API integrity and permissions", () => {
     expect(
       f.db.prepare("SELECT ended_at FROM shifts").get()!.ended_at,
     ).toBeNull();
+  });
+
+  test("a retried punch reports the actual roster after a manager closes the original shift", async () => {
+    const employee_id = await f.employee();
+    const token = await f.device();
+    const send = (event: unknown) =>
+      f.request("/kiosk/events", event, "POST", "", token);
+    const input = {
+      id: randomUUID(),
+      employee_id,
+      action: "in",
+      captured_at: new Date().toISOString(),
+      offline: false,
+    };
+    expect((await send(input)).data.status).toBe("accepted");
+    const saved = f.db
+      .prepare("SELECT * FROM shifts WHERE id=?")
+      .get(input.id)!;
+    const ended_at = new Date(
+      Date.parse(String(saved.started_at)) + 1000,
+    ).toISOString();
+    expect(
+      (
+        await f.request(
+          `/admin/records/${input.id}`,
+          {
+            ...saved,
+            ended_at,
+            reason: "누락 퇴근 확인",
+          },
+          "PATCH",
+        )
+      ).status,
+    ).toBe(200);
+    expect((await send({ ...input, offline: true })).data).toMatchObject({
+      status: "accepted",
+      shift_id: input.id,
+      open_shift: null,
+    });
   });
   test("blocks payroll confirmation and retirement while a shift is open, then allows corrected completion", async () => {
     const employee_id = await f.employee();

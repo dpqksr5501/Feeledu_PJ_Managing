@@ -3,6 +3,7 @@ import {
   MIN_PASSWORD_LENGTH,
   PASSWORD_HINT,
   PASSWORD_INPUT_PATTERN,
+  USERNAME_INPUT_PATTERN,
 } from "../../shared/password-format.ts";
 import type {
   Admin,
@@ -916,7 +917,7 @@ export function AccountForm({ account }: { account?: Admin }) {
         <Field label="아이디" hint="영문·숫자·밑줄·마침표·하이픈, 3~40자">
           <input
             name="username"
-            pattern="[a-zA-Z0-9_.-]{3,40}"
+            pattern={USERNAME_INPUT_PATTERN}
             required
             autoComplete="off"
           />

@@ -4,12 +4,7 @@ import { createServer, type Server } from "node:http";
 import express from "express";
 import type { RequestHandler } from "express";
 import { createHttpApp } from "../server/http.ts";
-import {
-  initializeDb,
-  audit,
-  transaction,
-  type Db,
-} from "../server/database.ts";
+import { initializeDb, audit, type Db } from "../server/database.ts";
 import { registerRoutes } from "../server/routes.ts";
 import {
   exportSnapshot,
@@ -20,6 +15,7 @@ import { durableDatabase } from "./database.ts";
 import * as security from "./security.ts";
 import { androidDownload } from "../shared/android-download.ts";
 import { HolidayCalendarService } from "../server/holiday-calendar.ts";
+import { migrationText } from "./migration-body.ts";
 
 interface Env {
   ACADEMY: DurableObjectNamespace<Academy>;
@@ -34,6 +30,7 @@ export class Academy extends DurableObject<Env> {
   private port = 0;
   private calendar: HolidayCalendarService;
   private nextCalendarCheck = 0;
+  private nextLimitCleanup = 0;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.db = durableDatabase(ctx.storage);
@@ -56,26 +53,29 @@ export class Academy extends DurableObject<Env> {
         name + ":" + (req.headers["x-feeledu-client-ip"] || "local"),
       );
       const now = Date.now();
-      let remaining = 0;
-      let expiresAt = now + windowMs;
-      transaction(this.db, () => {
+      if (now >= this.nextLimitCleanup) {
         this.db
           .prepare("DELETE FROM cloud_rate_limits WHERE expires_at<=?")
           .run(now);
-        const entry = this.db
-          .prepare("SELECT count,expires_at FROM cloud_rate_limits WHERE key=?")
-          .get(key);
-        if (entry) expiresAt = Number(entry.expires_at);
-        remaining = maximum - Number(entry?.count ?? 0) - 1;
-        // Rejected bursts must not consume additional write quota.
-        if (remaining >= 0)
+        this.nextLimitCleanup = now + 60000;
+      }
+      const accepted = this.db
+        .prepare(
+          `INSERT INTO cloud_rate_limits VALUES(?,1,?)
+         ON CONFLICT(key) DO UPDATE SET
+           count=CASE WHEN expires_at<=? THEN 1 ELSE count+1 END,
+           expires_at=CASE WHEN expires_at<=? THEN excluded.expires_at ELSE expires_at END
+         WHERE expires_at<=? OR count<?
+         RETURNING count`,
+        )
+        .get(key, now + windowMs, now, now, now, maximum);
+      // A saturated limit does not write or extend its original window.
+      if (!accepted) {
+        const expiresAt = Number(
           this.db
-            .prepare(
-              "INSERT INTO cloud_rate_limits VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1",
-            )
-            .run(key, expiresAt);
-      });
-      if (remaining < 0) {
+            .prepare("SELECT expires_at FROM cloud_rate_limits WHERE key=?")
+            .get(key)!.expires_at,
+        );
         res
           .set(
             "Retry-After",
@@ -141,15 +141,9 @@ export class Academy extends DurableObject<Env> {
           { error: "이미 운영 중인 DB입니다." },
           { status: 409 },
         );
-      const declared = Number(request.headers.get("Content-Length") || 0);
-      if (declared > 10 * 1024 * 1024)
-        return Response.json(
-          { error: "이전 파일이 너무 큽니다." },
-          { status: 413 },
-        );
       try {
-        const text = await request.text();
-        if (text.length > 10 * 1024 * 1024)
+        const text = await migrationText(request);
+        if (text === null)
           return Response.json(
             { error: "이전 파일이 너무 큽니다." },
             { status: 413 },
@@ -158,7 +152,6 @@ export class Academy extends DurableObject<Env> {
           this.db,
           JSON.parse(text),
         );
-        await this.ctx.storage.sync();
         return Response.json({ ok: true, counts });
       } catch {
         return Response.json(
@@ -172,14 +165,14 @@ export class Academy extends DurableObject<Env> {
       this.ctx.waitUntil(this.calendar.refreshCurrentYears());
     }
     if (!this.server) this.serve(url.origin);
-    const response = await handleAsNodeRequest(this.port, request);
-    await this.ctx.storage.sync();
-    return response;
+    // Durable Object output gates hold the response until SQL writes persist.
+    return handleAsNodeRequest(this.port, request);
   }
   async refreshHolidays() {
     await this.calendar.refreshCurrentYears();
   }
 }
+
 export default {
   async scheduled(
     _event: ScheduledController,

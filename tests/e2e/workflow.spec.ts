@@ -27,7 +27,14 @@ test("operator administration, paired tablet, offline reload and manager access"
   await admin.goto("/");
   await admin.getByLabel("초기 설정 코드").fill("test-only-setup-token");
   await admin.getByLabel("개발자 이름").fill("테스트 운영자");
-  await admin.getByLabel("아이디", { exact: true }).fill("qa-owner");
+  const initialUsername = admin.getByLabel("아이디", { exact: true });
+  await initialUsername.fill("qa owner");
+  expect(
+    await initialUsername.evaluate(
+      (input: HTMLInputElement) => input.validity.patternMismatch,
+    ),
+  ).toBe(true);
+  await initialUsername.fill("qa-owner");
   const initialPassword = admin.getByLabel("비밀번호", { exact: true });
   await initialPassword.fill("abcdefghij");
   expect(

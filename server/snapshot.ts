@@ -69,19 +69,22 @@ export function importSnapshotIntoEmptyDatabase(db: Db, input: unknown) {
     db.prepare("DELETE FROM job_roles WHERE id=?").run(DEFAULT_JOB_ID);
     // All table and column identifiers come from our schema, never the upload.
     for (const table of snapshotTables) {
+      const rows = snapshot.tables[table];
+      if (!rows?.length) continue;
       const columns = db
         .prepare(`PRAGMA table_info(${table})`)
         .all()
         .map((column) => String(column.name));
-      for (const item of snapshot.tables[table] ?? []) {
+      const insert = db.prepare(
+        `INSERT INTO ${table} (${columns.join(",")}) VALUES(${columns.map(() => "?").join(",")})`,
+      );
+      for (const item of rows) {
         if (
           Object.keys(item).some((column) => !columns.includes(column)) ||
           columns.some((column) => !(column in item))
         )
           throw new Error(`${table} 백업의 열 구성이 올바르지 않습니다.`);
-        db.prepare(
-          `INSERT INTO ${table} (${columns.join(",")}) VALUES(${columns.map(() => "?").join(",")})`,
-        ).run(...columns.map((column) => item[column]));
+        insert.run(...columns.map((column) => item[column]));
       }
     }
     seedDefaultJob(db);

@@ -20,6 +20,9 @@ export const kioskStore = {
       (a, b) => a.seq - b.seq,
     );
   },
+  async queueCount() {
+    return (await kioskDb).count("queue");
+  },
   async enqueue(event: ClockEvent) {
     const db = await kioskDb;
     const tx = db.transaction(["meta", "queue"], "readwrite");
@@ -55,6 +58,14 @@ export const kioskStore = {
           });
         if (result.status !== "accepted" || !result.shift_id)
           return { ...person, pending };
+        if (result.open_shift !== undefined)
+          return {
+            ...person,
+            working: !!result.open_shift,
+            open_shift_id: result.open_shift?.id ?? null,
+            open_job: result.open_shift?.job ?? null,
+            pending,
+          };
         const confirmed = projectRosterEntry({ ...person, pending: [] }, [
           { ...event, id: event.action === "out" ? event.id : result.shift_id },
         ]);
@@ -63,10 +74,11 @@ export const kioskStore = {
       await meta.put(roster, "roster");
     }
     await tx.objectStore("queue").delete(event.id);
+    const remaining = await tx.objectStore("queue").count();
     await tx.done;
-    return roster;
+    return { roster, remaining };
   },
-  async deferUnknownEmployee(id: string) {
+  async deferEvent(id: string) {
     const db = await kioskDb;
     const tx = db.transaction("queue", "readwrite");
     const item = await tx.store.get(id);

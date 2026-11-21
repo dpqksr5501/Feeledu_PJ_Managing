@@ -168,6 +168,7 @@ export function initializeDb(db: Db) {
         event_id TEXT PRIMARY KEY REFERENCES clock_events(id) ON DELETE CASCADE,
         job_id TEXT, expected_shift_id TEXT);
       CREATE INDEX IF NOT EXISTS clock_pending_by_employee ON clock_events(employee_id,captured_at,received_at) WHERE status='pending';
+      CREATE INDEX IF NOT EXISTS clock_pending_by_device ON clock_events(device_id,captured_at,received_at) WHERE status='pending';
     `);
     seedDefaultJob(db);
     db.prepare("INSERT OR IGNORE INTO schema_version VALUES(6)").run();

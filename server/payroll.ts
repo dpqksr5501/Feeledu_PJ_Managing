@@ -3,7 +3,6 @@ import type {
   Adjustment,
   DayRate,
   Employee,
-  Holiday,
   Payroll,
   PayrollRow,
   Rate,
@@ -25,6 +24,7 @@ import { shiftRangeSql } from "./shift-query.ts";
 import { calendarWarnings, getHolidays } from "./holidays.ts";
 import { attachShiftBreaks, breakError } from "./shift-breaks.ts";
 import { isNightTime, workSegmentEnd } from "../shared/night-work.ts";
+import { groupRows } from "./group-rows.ts";
 
 export function calculatePayroll(
   db: Db,
@@ -84,6 +84,20 @@ export function calculatePayroll(
     ) as { count: number };
   if (pending.count)
     warnings.push(`확인이 필요한 출퇴근 기록 ${pending.count}건이 있습니다.`);
+  const shiftsByEmployee = groupRows(shifts, (shift) => shift.employee_id);
+  const ratesByEmployee = groupRows(rates, (rate) => rate.employee_id);
+  const dayRateByEmployeeDate = new Map(
+    dayRates.map((rate) => [rate.employee_id + ":" + rate.date, rate]),
+  );
+  const adjustmentsByEmployee = groupRows(
+    adjustments,
+    (adjustment) => adjustment.employee_id,
+  );
+  const activeEmployeeIds = new Set(
+    employees
+      .filter((employee) => employee.active)
+      .map((employee) => employee.id),
+  );
   const rows = employees
     .map((employee) => {
       const row: PayrollRow = {
@@ -102,20 +116,33 @@ export function calculatePayroll(
         dailyDetails: [],
       };
       const weekly = new Map<string, { milliseconds: number; base: number }>();
-      const employeeRates = rates.filter(
-        (rate) => rate.employee_id === employee.id,
-      );
-      for (const shift of shifts.filter((s) => s.employee_id === employee.id)) {
+      const dailyDetails = new Map<
+        string,
+        NonNullable<PayrollRow["dailyDetails"]>[number]
+      >();
+      const employeeRates = ratesByEmployee.get(employee.id) ?? [];
+      for (const shift of shiftsByEmployee.get(employee.id) ?? []) {
+        const start = Date.parse(shift.started_at);
+        if (!Number.isFinite(start)) {
+          row.warnings.push("근무 시작 시각을 확인해 주세요.");
+          continue;
+        }
         if (!shift.ended_at) {
           row.warnings.push(
             `${seoulDate(shift.started_at)} 퇴근 기록이 없습니다.`,
           );
           continue;
         }
-        const start = Date.parse(shift.started_at),
-          finish = Date.parse(shift.ended_at);
+        const finish = Date.parse(shift.ended_at);
         const duration = (finish - start) / 1000;
-        if (duration <= 0 || shift.break_minutes * 60 >= duration) {
+        if (
+          !Number.isFinite(duration) ||
+          duration <= 0 ||
+          duration > 86400 ||
+          !Number.isInteger(shift.break_minutes) ||
+          shift.break_minutes < 0 ||
+          shift.break_minutes * 60 >= duration
+        ) {
           row.warnings.push("근무시간 또는 휴게시간을 확인해 주세요.");
           continue;
         }
@@ -165,9 +192,7 @@ export function calculatePayroll(
           const seconds = paidMilliseconds / 1000;
           const exceptional =
             jobId === DEFAULT_JOB_ID
-              ? dayRates.find(
-                  (r) => r.employee_id === employee.id && r.date === date,
-                )
+              ? dayRateByEmployeeDate.get(employee.id + ":" + date)
               : jobPersonalRates.find(
                   (r) => r.kind === "day" && r.date === date,
                 );
@@ -213,10 +238,8 @@ export function calculatePayroll(
               : 0;
             row.nightSeconds! += nightSeconds;
             row.night! += night;
-            const daily = row.dailyDetails!.find(
-              (day) =>
-                day.date === date && day.jobId === (shift.job_id ?? undefined),
-            );
+            const dailyKey = date + ":" + jobId;
+            const daily = dailyDetails.get(dailyKey);
             if (daily) {
               daily.seconds += seconds;
               daily.base += base;
@@ -224,7 +247,7 @@ export function calculatePayroll(
               daily.nightSeconds! += nightSeconds;
               daily.night! += night;
             } else
-              row.dailyDetails!.push({
+              dailyDetails.set(dailyKey, {
                 date,
                 ...(shift.job_id && shift.job_name
                   ? { jobId: shift.job_id, jobName: shift.job_name }
@@ -269,9 +292,11 @@ export function calculatePayroll(
       row.nightSeconds = Math.round(row.nightSeconds!);
       row.weekly = Math.round(row.weekly);
       row.seconds = Math.round(row.seconds);
-      row.adjustment = adjustments
-        .filter((a) => a.employee_id === employee.id)
-        .reduce((sum, a) => sum + a.amount, 0);
+      row.dailyDetails = [...dailyDetails.values()];
+      row.adjustment = (adjustmentsByEmployee.get(employee.id) ?? []).reduce(
+        (sum, a) => sum + a.amount,
+        0,
+      );
       row.total =
         row.base + row.holiday + row.night + row.weekly + row.adjustment;
       row.warnings = [...new Set(row.warnings)];
@@ -284,7 +309,7 @@ export function calculatePayroll(
         r.weekly ||
         r.holiday ||
         r.warnings.length ||
-        employees.find((e) => e.id === r.employeeId)?.active,
+        activeEmployeeIds.has(r.employeeId),
     );
   const latest = db
     .prepare(
@@ -297,6 +322,7 @@ export function calculatePayroll(
         total: number;
         created_at: string;
         created_by_name: string;
+        fingerprint: string;
         snapshot: string;
       }
     | undefined;
@@ -320,6 +346,7 @@ export function calculatePayroll(
           total: latest.total,
           created_at: latest.created_at,
           created_by_name: latest.created_by_name,
+          fingerprint: latest.fingerprint,
           snapshot: JSON.parse(latest.snapshot),
         }
       : null,

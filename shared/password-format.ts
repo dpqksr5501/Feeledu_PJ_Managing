@@ -1,4 +1,5 @@
 export const MIN_PASSWORD_LENGTH = 10;
+export const USERNAME_INPUT_PATTERN = String.raw`[a-zA-Z0-9_.\-]{3,40}`;
 // Letters (including Korean), numbers and whitespace do not count as special characters.
 export const PASSWORD_SPECIAL_CHARACTER = /[\p{P}\p{S}]/u;
 export const PASSWORD_INPUT_PATTERN = String.raw`.*[\p{P}\p{S}].*`;

@@ -10,6 +10,7 @@ import { z } from "zod";
 import { randomInt, randomUUID } from "node:crypto";
 import { audit, getPolicy, transaction, type Db } from "./database.ts";
 import { calculatePayroll } from "./payroll.ts";
+import { employeeDirectory } from "./employees.ts";
 import { attendanceWeek } from "./attendance.ts";
 import { overlappingShift, shiftRangeSql } from "./shift-query.ts";
 import { HolidayCalendarService } from "./holiday-calendar.ts";
@@ -30,7 +31,11 @@ import type {
   Rate,
 } from "../shared/types.ts";
 import { rateMonthVersion } from "../shared/rate-month.ts";
-import { DEFAULT_JOB_ID, type JobRate } from "../shared/jobs.ts";
+import {
+  DEFAULT_JOB_ID,
+  DEFAULT_JOB_NAME,
+  type JobRate,
+} from "../shared/jobs.ts";
 import {
   assignedJobs,
   employeeJobAssignments,
@@ -40,6 +45,7 @@ import {
 import {
   MIN_PASSWORD_LENGTH,
   PASSWORD_SPECIAL_CHARACTER,
+  USERNAME_INPUT_PATTERN,
 } from "../shared/password-format.ts";
 import {
   initializeAuthState,
@@ -110,7 +116,7 @@ const password = z
     "비밀번호에 특수문자를 1개 이상 포함해 주세요.",
   );
 const account = z.object({
-  username: z.string().regex(/^[a-zA-Z0-9_.-]{3,40}$/),
+  username: z.string().regex(new RegExp(`^${USERNAME_INPUT_PATTERN}$`)),
   name: text,
   password,
 });
@@ -275,7 +281,9 @@ export function registerRoutes(
     next();
   };
   const requireDevice = (req: Authed, _res: Response, next: NextFunction) => {
-    const token = req.get("Authorization")?.replace(/^Bearer /, "");
+    const token = /^Bearer ([^\s]+)$/i.exec(
+      req.get("Authorization") ?? "",
+    )?.[1];
     const device =
       token &&
       one<Device>(
@@ -513,29 +521,7 @@ export function registerRoutes(
     );
     res.json({ ok: true });
   });
-  admin.get("/employees", (_req, res) =>
-    res.json(
-      db
-        .prepare(
-          `SELECT e.*,COALESCE((SELECT hourly_rate FROM day_rates d WHERE d.employee_id=e.id AND d.date=?),(SELECT hourly_rate FROM rates r WHERE r.employee_id=e.id AND r.effective_from<=? ORDER BY effective_from DESC LIMIT 1)) AS current_rate FROM employees e ORDER BY active DESC,name`,
-        )
-        .all(seoulDate(), seoulDate())
-        .map((e) => ({
-          ...e,
-          rates: db
-            .prepare(
-              "SELECT * FROM rates WHERE employee_id=? ORDER BY effective_from DESC",
-            )
-            .all(e.id as string),
-          day_rates: db
-            .prepare(
-              "SELECT * FROM day_rates WHERE employee_id=? ORDER BY date DESC",
-            )
-            .all(e.id as string),
-          jobs: employeeJobAssignments(db, String(e.id)),
-        })),
-    ),
-  );
+  admin.get("/employees", (_req, res) => res.json(employeeDirectory(db)));
   admin.post("/employees", (req: Authed, res) => {
     const body = employeeSchema
       .extend({
@@ -1191,27 +1177,27 @@ export function registerRoutes(
     let imported = 0,
       existing = 0;
     transaction(db, () => {
-      const deviceId = randomUUID();
-      db.prepare("INSERT INTO devices VALUES(?,?,?,?,?,?)").run(
-        deviceId,
-        "관리자 복구 파일",
-        hash(secret()),
-        0,
-        null,
-        new Date().toISOString(),
+      let deviceId: string | null = null;
+      const receivedAt = new Date().toISOString();
+      const checkedEmployees = new Set<string>();
+      const getEmployee = db.prepare("SELECT id FROM employees WHERE id=?");
+      const getPrior = db.prepare(
+        "SELECT fingerprint FROM clock_events WHERE id=?",
+      );
+      const insertEvent = db.prepare(
+        "INSERT INTO clock_events VALUES(?,?,?,?,?,?,?,?,?,?)",
       );
       for (const event of body.events) {
-        if (!one(db, "SELECT id FROM employees WHERE id=?", event.employee_id))
-          fail(
-            400,
-            "현재 학원에 없는 직원이 포함돼 있습니다. 파일을 확인해 주세요.",
-          );
+        if (!checkedEmployees.has(event.employee_id)) {
+          if (!getEmployee.get(event.employee_id))
+            fail(
+              400,
+              "현재 학원에 없는 직원이 포함돼 있습니다. 파일을 확인해 주세요.",
+            );
+          checkedEmployees.add(event.employee_id);
+        }
         const fingerprint = clockFingerprint(event);
-        const prior = one<{ fingerprint: string }>(
-          db,
-          "SELECT fingerprint FROM clock_events WHERE id=?",
-          event.id,
-        );
+        const prior = getPrior.get(event.id);
         if (prior) {
           if (prior.fingerprint !== fingerprint)
             fail(
@@ -1221,13 +1207,24 @@ export function registerRoutes(
           existing++;
           continue;
         }
-        db.prepare("INSERT INTO clock_events VALUES(?,?,?,?,?,?,?,?,?,?)").run(
+        if (!deviceId) {
+          deviceId = randomUUID();
+          db.prepare("INSERT INTO devices VALUES(?,?,?,?,?,?)").run(
+            deviceId,
+            "관리자 복구 파일",
+            hash(secret()),
+            0,
+            null,
+            receivedAt,
+          );
+        }
+        insertEvent.run(
           event.id,
           deviceId,
           event.employee_id,
           event.action,
           event.captured_at,
-          new Date().toISOString(),
+          receivedAt,
           "pending",
           "관리자가 미전송 파일에서 복구한 기록",
           fingerprint,
@@ -1236,11 +1233,12 @@ export function registerRoutes(
         storeClockJob(event);
         imported++;
       }
-      audit(db, req.admin!.id, "clock.recover", deviceId, {
-        imported,
-        existing,
-        ids: body.events.map((e) => e.id),
-      });
+      if (deviceId)
+        audit(db, req.admin!.id, "clock.recover", deviceId, {
+          imported,
+          existing,
+          ids: body.events.map((e) => e.id),
+        });
     });
     res.json({ imported, existing });
   });
@@ -1295,6 +1293,11 @@ export function registerRoutes(
         : resolveJob(employeeId, event.job_id, historical);
     if (action === "switch" && open && jobId === shiftJob(open.id))
       fail(409, "이미 같은 직무로 근무 중입니다.");
+    if (jobId && one(db, "SELECT id FROM shifts WHERE id=?", id))
+      fail(
+        409,
+        "이 기록 번호가 기존 근무에 사용 중입니다. 근무기록을 확인해 주세요.",
+      );
     if (open)
       validateShift(
         {
@@ -1568,13 +1571,7 @@ export function registerRoutes(
         fail(409, "미확인 기록과 계산 경고를 먼저 해결해 주세요.");
       if (body.to >= seoulDate())
         fail(409, "진행 중인 날짜가 포함된 정산은 확정할 수 없습니다.");
-      const previous = one<{ fingerprint: string }>(
-        db,
-        "SELECT fingerprint FROM settlements WHERE date_from=? AND date_to=? ORDER BY version DESC LIMIT 1",
-        body.from,
-        body.to,
-      );
-      if (previous?.fingerprint === payroll.fingerprint)
+      if (payroll.settlement?.fingerprint === payroll.fingerprint)
         fail(409, "동일한 내용으로 이미 확정됐습니다.");
       const version = (payroll.settlement?.version || 0) + 1;
       db.prepare("INSERT INTO settlements VALUES(?,?,?,?,?,?,?,?,?,?)").run(
@@ -1857,10 +1854,38 @@ export function registerRoutes(
             existing.device_id !== req.device!.id
           )
             fail(409, "중복 기록의 내용이 일치하지 않습니다.");
+          const open =
+            existing.status === "accepted"
+              ? one<{
+                  id: string;
+                  job_id: string | null;
+                  job_name: string | null;
+                }>(
+                  db,
+                  `SELECT s.id,sj.job_id,j.name AS job_name FROM shifts s
+             LEFT JOIN shift_jobs sj ON sj.shift_id=s.id
+             LEFT JOIN job_roles j ON j.id=sj.job_id
+             WHERE s.employee_id=? AND s.ended_at IS NULL AND s.voided=0`,
+                  body.employee_id,
+                )
+              : undefined;
           result = {
             status: existing.status,
             review_reason: existing.review_reason,
             shift_id: existing.shift_id,
+            ...(existing.status === "accepted"
+              ? {
+                  open_shift: open
+                    ? {
+                        id: open.id,
+                        job: {
+                          id: open.job_id ?? DEFAULT_JOB_ID,
+                          name: open.job_name ?? DEFAULT_JOB_NAME,
+                        },
+                      }
+                    : null,
+                }
+              : {}),
           };
           return;
         }
@@ -1926,6 +1951,17 @@ export function registerRoutes(
         });
       if (error instanceof HttpError)
         return res.status(error.status).json({ error: error.message });
+      if (error && typeof error === "object" && "type" in error) {
+        if (error.type === "entity.too.large")
+          return res.status(413).json({ error: "요청 데이터가 너무 큽니다." });
+        if (
+          error.type === "encoding.unsupported" ||
+          error.type === "charset.unsupported"
+        )
+          return res
+            .status(415)
+            .json({ error: "지원하지 않는 요청 인코딩입니다." });
+      }
       if (error instanceof SyntaxError)
         return res.status(400).json({ error: "요청 형식을 확인해 주세요." });
       console.error(error);

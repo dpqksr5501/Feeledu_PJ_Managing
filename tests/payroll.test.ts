@@ -9,6 +9,36 @@ beforeEach(async () => {
 afterEach(async () => {
   await f.close();
 });
+test("warns and blocks settlement for a historical shift outside the allowed duration", async () => {
+  const id = await f.employee();
+  f.db
+    .prepare(
+      "INSERT INTO shifts(id,employee_id,started_at,ended_at,source,created_at) VALUES(?,?,?,?,?,?)",
+    )
+    .run(
+      "legacy-shift",
+      id,
+      "2026-10-26T00:00:00.000Z",
+      "2026-10-27T01:00:00.000Z",
+      "manual",
+      "2026-10-27",
+    );
+  const payroll = calculatePayroll(f.db, "2026-10-26", "2026-10-28");
+  expect(payroll.rows[0]).toMatchObject({
+    total: 0,
+    warnings: ["근무시간 또는 휴게시간을 확인해 주세요."],
+  });
+  expect(
+    (
+      await f.request("/admin/settlements", {
+        from: payroll.from,
+        to: payroll.to,
+        fingerprint: payroll.fingerprint,
+        reason: "오류 확인",
+      })
+    ).status,
+  ).toBe(409);
+});
 test("retroactive rate changes recompute weekly/holiday pay but preserve prior settlement snapshots", async () => {
   const id = await f.employee();
   for (const day of ["26", "27", "28"])

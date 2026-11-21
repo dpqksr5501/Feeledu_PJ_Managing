@@ -146,6 +146,44 @@ test("rejects cross-origin writes even with an authenticated cookie", async () =
   expect(response.status).toBe(403);
 });
 
+test("checks origin before parsing and gives bounded JSON errors for invalid API requests", async () => {
+  const send = (body: string, origin = f.base) =>
+    fetch(f.base + "/api/admin/activity", {
+      method: "POST",
+      headers: {
+        Cookie: f.cookie,
+        Origin: origin,
+        "X-Requested-With": "Feeledu",
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+  const large = JSON.stringify({ note: "가".repeat(50000) });
+  const foreign = await send(large, "https://other.invalid");
+  expect(foreign.status).toBe(403);
+  const oversized = await send(large);
+  expect(oversized.status).toBe(413);
+  expect(oversized.headers.get("cache-control")).toBe("no-store");
+  expect(await oversized.json()).toEqual({
+    error: "요청 데이터가 너무 큽니다.",
+  });
+  expect((await send("{")).status).toBe(400);
+});
+
+test("only accepts a bearer token for kiosk access and publishes no rates", async () => {
+  await f.employee();
+  const token = await f.device();
+  const raw = await fetch(f.base + "/api/kiosk/roster", {
+    headers: { Authorization: token },
+  });
+  expect(raw.status).toBe(401);
+  const roster = await f.request("/kiosk/roster", undefined, "GET", "", token);
+  expect(roster.status).toBe(200);
+  expect(JSON.stringify(roster.data)).not.toMatch(
+    /hourly_rate|day_rates|current_rate/,
+  );
+});
+
 test("enforces ten characters and a real special character for new, reset and changed passwords", async () => {
   for (const password of [
     "Abcdefg1!",

@@ -59,14 +59,23 @@ test("ten years of history keeps indexed Cloudflare row reads bounded and result
     const result = (await response.json()) as {
       equivalent: boolean;
       calendarSynced: boolean;
-      before: Record<string, { reads: number; writes: number }>;
-      after: Record<string, { reads: number; writes: number }>;
+      before: Record<
+        string,
+        { reads: number; writes: number; queries: number }
+      >;
+      after: Record<string, { reads: number; writes: number; queries: number }>;
     };
     console.info("Isolated Workerd SQL row costs:", JSON.stringify(result));
     mkdirSync(".tmp", { recursive: true });
     writeFileSync(".tmp/query-cost.json", JSON.stringify(result, null, 2));
     expect(result.equivalent).toBe(true);
     expect(result.calendarSynced).toBe(true);
+    expect(result.before.directory.queries).toBe(81);
+    expect(result.after.directory.queries).toBe(5);
+    expect(result.after.directory.reads).toBeLessThanOrEqual(
+      result.before.directory.reads,
+    );
+    expect(result.after.directory.writes).toBe(0);
     for (const key of [
       "overlap",
       "week",

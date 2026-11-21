@@ -2,6 +2,19 @@ import { DEFAULT_JOB_ID, DEFAULT_JOB_NAME } from "../shared/jobs.ts";
 import type { Job, JobAssignment, JobRate, JobRole } from "../shared/jobs.ts";
 import type { ClockEvent, RosterEntry } from "../shared/types.ts";
 import type { Db } from "./database.ts";
+import { groupRows } from "./group-rows.ts";
+
+const defaultJob: Job = { id: DEFAULT_JOB_ID, name: DEFAULT_JOB_NAME };
+const defaultAssignment = {
+  ...defaultJob,
+  active: 1,
+  assigned: 1,
+  is_default: 1,
+};
+type AssignmentRow = Omit<JobAssignment, "rates"> & { employee_id: string };
+const assignmentSelect = `SELECT ej.employee_id,j.id,j.name,j.active,ej.active AS assigned,ej.is_default
+  FROM employee_jobs ej JOIN job_roles j ON j.id=ej.job_id`;
+const assignmentOrder = "ORDER BY ej.is_default DESC,j.name,j.id";
 
 export function jobCatalog(db: Db): JobRole[] {
   const roles = db
@@ -12,53 +25,62 @@ export function jobCatalog(db: Db): JobRole[] {
       "SELECT * FROM job_rates WHERE employee_id IS NULL ORDER BY date DESC",
     )
     .all() as unknown as JobRate[];
+  const byJob = groupRows(rates, (rate) => rate.job_id);
   return roles.map((role) => ({
     ...(role as unknown as Omit<JobRole, "rates">),
-    rates: rates.filter((r) => r.job_id === role.id),
+    rates: byJob.get(String(role.id)) ?? [],
   }));
 }
 
 export function employeeJobAssignments(
   db: Db,
   employeeId: string,
-): JobAssignment[] {
+): Omit<JobAssignment, "rates">[] {
   const rows = db
-    .prepare(
-      `SELECT j.id,j.name,j.active,ej.active AS assigned,ej.is_default
-       FROM employee_jobs ej JOIN job_roles j ON j.id=ej.job_id
-       WHERE ej.employee_id=? ORDER BY ej.is_default DESC,j.name,j.id`,
-    )
-    .all(employeeId) as unknown as Omit<JobAssignment, "rates">[];
-  const rates = db
-    .prepare("SELECT * FROM job_rates WHERE employee_id=? ORDER BY date DESC")
-    .all(employeeId) as unknown as JobRate[];
-  if (!rows.length)
-    rows.push({
-      id: DEFAULT_JOB_ID,
-      name: DEFAULT_JOB_NAME,
-      active: 1,
-      assigned: 1,
-      is_default: 1,
-    });
-  return rows.map((job) => ({
-    ...job,
-    rates: rates.filter((r) => r.job_id === job.id),
-  }));
+    .prepare(`${assignmentSelect} WHERE ej.employee_id=? ${assignmentOrder}`)
+    .all(employeeId) as unknown as AssignmentRow[];
+  return rows.length
+    ? rows.map(({ id, name, active, assigned, is_default }) => ({
+        id,
+        name,
+        active,
+        assigned,
+        is_default,
+      }))
+    : [defaultAssignment];
 }
 
 export function assignedJobs(db: Db, employeeId: string): Job[] {
-  const rows = db
+  return employeeJobAssignments(db, employeeId)
+    .filter((job) => job.assigned && job.active)
+    .map(({ id, name }) => ({ id, name }));
+}
+
+export function employeeJobDirectory(db: Db) {
+  const assignments = db
+    .prepare(`${assignmentSelect} ${assignmentOrder}`)
+    .all() as unknown as AssignmentRow[];
+  const rates = db
     .prepare(
-      `SELECT j.id,j.name,ej.active AS assigned,j.active
-       FROM employee_jobs ej JOIN job_roles j ON j.id=ej.job_id
-       WHERE ej.employee_id=? ORDER BY ej.is_default DESC,j.name,j.id`,
+      "SELECT * FROM job_rates WHERE employee_id IS NOT NULL ORDER BY date DESC",
     )
-    .all(employeeId);
-  return rows.length
-    ? rows
-        .filter((job) => job.assigned && job.active)
-        .map(({ id, name }) => ({ id: String(id), name: String(name) }))
-    : [{ id: DEFAULT_JOB_ID, name: DEFAULT_JOB_NAME }];
+    .all() as unknown as JobRate[];
+  const byEmployee = groupRows(assignments, (row) => row.employee_id);
+  const byAssignment = groupRows(
+    rates,
+    (rate) => rate.employee_id + ":" + rate.job_id,
+  );
+  return (employeeId: string): JobAssignment[] =>
+    (byEmployee.get(employeeId) ?? [defaultAssignment]).map(
+      ({ id, name, active, assigned, is_default }) => ({
+        id,
+        name,
+        active,
+        assigned,
+        is_default,
+        rates: byAssignment.get(employeeId + ":" + id) ?? [],
+      }),
+    );
 }
 
 export function rosterJobs(db: Db, deviceId: string): RosterEntry[] {
@@ -121,9 +143,7 @@ export function rosterJobs(db: Db, deviceId: string): RosterEntry[] {
       name: String(row.name),
       phone_last4: String(row.phone_last4),
       working: !!row.shift_id,
-      jobs: byEmployee.get(id) ?? [
-        { id: DEFAULT_JOB_ID, name: DEFAULT_JOB_NAME },
-      ],
+      jobs: byEmployee.get(id) ?? [defaultJob],
       open_shift_id: row.shift_id as string | null,
       open_job: row.shift_id
         ? {

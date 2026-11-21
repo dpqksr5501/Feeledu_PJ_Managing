@@ -74,7 +74,7 @@ export default function Kiosk() {
     !selected &&
     !code &&
     loaded &&
-    (await kioskStore.queue()).length === 0;
+    (await kioskStore.queueCount()) === 0;
   const [revoked, setRevoked] = useState(false);
   useEffect(() => registerUpdateGuard(() => safeToUpdate.current()), []);
   useEffect(() => {
@@ -120,6 +120,7 @@ export default function Kiosk() {
       return;
     flushing.current = true;
     const synchronize = async () => {
+      let acknowledged = false;
       try {
         const queue = await kioskStore.queue();
         setPending(queue.length);
@@ -149,20 +150,25 @@ export default function Kiosk() {
             )
               throw new Error("출퇴근 응답을 확인하지 못했습니다.");
             const confirmed = await kioskStore.acknowledge(item, result);
-            if (confirmed) setRoster(confirmed);
-            setPending((await kioskStore.queue()).length);
+            acknowledged = true;
+            if (confirmed.roster) setRoster(confirmed.roster);
+            setPending(confirmed.remaining);
             setMessage({
               kind: result.status === "accepted" ? "success" : "review",
               text:
                 result.status === "accepted"
                   ? `${clockActionLabel[item.action]} 완료`
-                  : `관리자 확인 대기 · ${result.review_reason}`,
+                  : result.status === "pending"
+                    ? `관리자 확인 대기 · ${result.review_reason}`
+                    : "관리자가 이 기록을 반려했습니다.",
             });
           } catch (err) {
-            if (err instanceof ApiError && err.status === 404) {
-              // Keep an orphaned event for recovery, but do not let it block
-              // unrelated employees. Preserve per-employee event ordering.
-              await kioskStore.deferUnknownEmployee(item.id);
+            if (
+              err instanceof ApiError &&
+              [400, 404, 409].includes(err.status)
+            ) {
+              // Retain the rejected payload for recovery and preserve per-employee order.
+              await kioskStore.deferEvent(item.id);
               deferredEmployees.add(item.employee_id);
               deferred = true;
               continue;
@@ -180,10 +186,9 @@ export default function Kiosk() {
         }
         if (attempted || Date.now() - lastRosterRead.current >= 60000)
           await refreshRoster();
-        setQueueView(await kioskStore.queue());
         setError(
           deferred
-            ? "직원 정보 확인이 필요한 미전송 기록이 있습니다. ‘기록 보관’ 후 관리자에게 확인해 주세요."
+            ? "확인이 필요한 미전송 기록이 있습니다. ‘기록 보관’ 후 관리자에게 확인해 주세요."
             : "",
         );
         retry.current.success();
@@ -193,6 +198,14 @@ export default function Kiosk() {
         if (err instanceof ApiError) {
           setError(err.message);
           if (err.status === 401) setRevoked(true);
+        }
+      } finally {
+        if (acknowledged) {
+          const remaining = await kioskStore.queue().catch(() => undefined);
+          if (remaining) {
+            setPending(remaining.length);
+            setQueueView(remaining);
+          }
         }
       }
     };

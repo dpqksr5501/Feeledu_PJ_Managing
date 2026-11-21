@@ -11,6 +11,7 @@ import {
   MIN_PASSWORD_LENGTH,
   PASSWORD_HINT,
   PASSWORD_INPUT_PATTERN,
+  USERNAME_INPUT_PATTERN,
 } from "../shared/password-format.ts";
 
 function Auth({ setup, done }: { setup: boolean; done: () => void }) {
@@ -63,7 +64,7 @@ function Auth({ setup, done }: { setup: boolean; done: () => void }) {
               <input
                 name="username"
                 required
-                pattern={setup ? "[a-zA-Z0-9_.-]{3,40}" : undefined}
+                pattern={setup ? USERNAME_INPUT_PATTERN : undefined}
                 maxLength={40}
                 autoComplete="username"
                 placeholder="관리자 아이디"
