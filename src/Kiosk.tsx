@@ -108,7 +108,7 @@ export default function Kiosk() {
     setRoster(data);
     await kioskStore.set("roster", data);
     lastRosterRead.current = Date.now();
-    setOnline(true);
+    setOnline(navigator.onLine);
   }, [token]);
   const flush = useCallback(async () => {
     if (
@@ -345,7 +345,7 @@ export default function Kiosk() {
         employee_id: selected.id,
         action,
         captured_at: new Date().toISOString(),
-        offline: !online,
+        offline: !navigator.onLine || !online,
         ...(job ? { job_id: job.id } : {}),
         ...(action !== "in" && selected.open_shift_id
           ? { expected_shift_id: selected.open_shift_id }

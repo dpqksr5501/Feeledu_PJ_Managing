@@ -1119,6 +1119,25 @@ test("operator administration, paired tablet, offline reload and manager access"
     await expect(
       kiosk.getByText("전송 대기 1건", { exact: true }),
     ).toBeVisible();
+    const queuedSwitch = await kiosk.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const open = indexedDB.open("feeledu-kiosk-v1", 1);
+        open.onsuccess = () => resolve(open.result);
+        open.onerror = () => reject(open.error);
+      });
+      try {
+        return await new Promise<{ action: string; offline: boolean }[]>(
+          (resolve, reject) => {
+            const read = db.transaction("queue").objectStore("queue").getAll();
+            read.onsuccess = () => resolve(read.result);
+            read.onerror = () => reject(read.error);
+          },
+        );
+      } finally {
+        db.close();
+      }
+    });
+    expect(queuedSwitch).toMatchObject([{ action: "switch", offline: true }]);
     await kiosk.reload();
     await selectJobTester("0037", "겸직 검증");
     await expect(
