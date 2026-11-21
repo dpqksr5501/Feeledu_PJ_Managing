@@ -26,6 +26,7 @@ import {
 } from "../../shared/time.ts";
 import { api, ApiError, download } from "../api.ts";
 import { Alert, Empty, Help, Loading, Modal } from "../ui.tsx";
+import { DEFAULT_JOB_NAME } from "../../shared/jobs.ts";
 
 export function duration(seconds: number) {
   if (seconds > 0 && seconds < 60) return "1분 미만";
@@ -655,6 +656,7 @@ export default function WeeklyAttendance({
                   <thead>
                     <tr>
                       {!selected.person && <th>직원</th>}
+                      <th>직무</th>
                       <th>출근</th>
                       <th>퇴근</th>
                       <th>휴게</th>
@@ -677,6 +679,7 @@ export default function WeeklyAttendance({
                             }
                           </td>
                         )}
+                        <td>{segment.jobName ?? DEFAULT_JOB_NAME}</td>
                         <td>{timeWithSeconds(segment.startedAt)}</td>
                         <td>
                           {segment.ongoing

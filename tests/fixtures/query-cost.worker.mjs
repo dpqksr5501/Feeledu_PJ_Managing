@@ -61,7 +61,14 @@ export class QueryBenchmark extends DurableObject {
               }
               if (legacy && query.includes("INDEXED BY shifts_end")) {
                 const names = query.includes("e.name");
-                query = `SELECT s.*${names ? ",e.name" : ""} FROM shifts s ${names ? "JOIN employees e ON e.id=s.employee_id" : ""} WHERE ${names ? "" : "s.voided=0 AND"} s.started_at<? AND(s.ended_at IS NULL OR s.ended_at>?) ORDER BY s.started_at ${names ? "DESC" : "ASC"}`;
+                const order = names ? "DESC" : "ASC";
+                query = query
+                  .split("UNION ALL")[0]
+                  .replace("INDEXED BY shifts_end", "")
+                  .replace(
+                    /WHERE s\.ended_at IS NULL AND s\.started_at<\? (.*)$/s,
+                    `WHERE s.started_at<? AND (s.ended_at IS NULL OR s.ended_at>?) $1 ORDER BY s.started_at ${order}`,
+                  );
                 args = args.slice(0, 2);
               }
               const cursor = sql.exec(query, ...args);
@@ -141,7 +148,7 @@ export class QueryBenchmark extends DurableObject {
       };
     };
     db.exec(
-      "DROP INDEX shifts_end; DROP INDEX shifts_employee_end; DROP INDEX clock_pending; DROP INDEX audit_recent; DROP INDEX audit_action_recent; DROP INDEX adjustments_date; DROP INDEX day_rates_date; DROP INDEX rates_effective;",
+      "DROP INDEX shifts_end; DROP INDEX shifts_employee_end; DROP INDEX clock_pending; DROP INDEX clock_pending_by_employee; DROP INDEX audit_recent; DROP INDEX audit_action_recent; DROP INDEX adjustments_date; DROP INDEX day_rates_date; DROP INDEX rates_effective;",
     );
     const before = measure(true);
     initializeDb(db);

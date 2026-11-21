@@ -24,11 +24,19 @@ import { addDays, dayStart, seoulDate } from "../shared/time.ts";
 import type {
   Admin,
   ClockEvent,
+  ClockResult,
   Device,
   Shift,
   Rate,
 } from "../shared/types.ts";
 import { rateMonthVersion } from "../shared/rate-month.ts";
+import { DEFAULT_JOB_ID, type JobRate } from "../shared/jobs.ts";
+import {
+  assignedJobs,
+  employeeJobAssignments,
+  jobCatalog,
+  rosterJobs,
+} from "./jobs.ts";
 import {
   MIN_PASSWORD_LENGTH,
   PASSWORD_SPECIAL_CHARACTER,
@@ -74,6 +82,17 @@ const instant = z.iso
   .datetime({ offset: true })
   .transform((v) => new Date(v).toISOString());
 const text = z.string().trim().min(1).max(100);
+const hourlyRate = z.number().int().min(1).max(1000000);
+const rateMonth = z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])-01$/);
+const jobName = z.string().trim().normalize().min(1).max(40);
+const clockSchema = z.object({
+  id: idSchema,
+  employee_id: idSchema,
+  action: z.enum(["in", "out", "switch"]),
+  captured_at: instant,
+  job_id: idSchema.optional(),
+  expected_shift_id: idSchema.optional(),
+});
 const reason = z
   .string()
   .trim()
@@ -118,6 +137,7 @@ const policySchema = z.object({
 });
 const shiftSchema = z.object({
   employee_id: idSchema,
+  job_id: idSchema.nullish(),
   started_at: instant,
   ended_at: instant.nullable(),
   break_minutes: z.number().int().min(0).max(1440),
@@ -512,18 +532,41 @@ export function registerRoutes(
               "SELECT * FROM day_rates WHERE employee_id=? ORDER BY date DESC",
             )
             .all(e.id as string),
+          jobs: employeeJobAssignments(db, String(e.id)),
         })),
     ),
   );
   admin.post("/employees", (req: Authed, res) => {
     const body = employeeSchema
       .extend({
-        hourly_rate: z.number().int().min(1).max(1000000),
+        hourly_rate: hourlyRate.optional(),
         effective_from: date,
+        job_id: idSchema.default(DEFAULT_JOB_ID),
       })
       .parse(req.body);
     const id = randomUUID();
     transaction(db, () => {
+      if (
+        !one(
+          db,
+          "SELECT id FROM job_roles WHERE id=? AND active=1",
+          body.job_id,
+        )
+      )
+        fail(409, "사용 가능한 직무를 선택해 주세요.");
+      if (
+        body.hourly_rate === undefined &&
+        !one(
+          db,
+          "SELECT id FROM job_rates WHERE job_id=? AND employee_id IS NULL AND date<=? LIMIT 1",
+          body.job_id,
+          body.effective_from,
+        )
+      )
+        fail(
+          400,
+          "선택한 적용 월에 직무 시급이 없습니다. 최초 시급을 입력해 주세요.",
+        );
       db.prepare(
         "INSERT INTO employees (id,name,phone_last4,active,note,weekly_enabled,holiday_multiplier,created_at) VALUES(?,?,?,?,?,?,?,?)",
       ).run(
@@ -536,17 +579,241 @@ export function registerRoutes(
         body.holiday_multiplier,
         new Date().toISOString(),
       );
-      db.prepare("INSERT INTO rates VALUES(?,?,?,?,?,?)").run(
-        randomUUID(),
-        id,
-        body.effective_from,
-        body.hourly_rate,
-        "최초 등록",
-        new Date().toISOString(),
-      );
+      if (body.job_id !== DEFAULT_JOB_ID)
+        db.prepare("INSERT INTO employee_jobs VALUES(?,?,1,1)").run(
+          id,
+          body.job_id,
+        );
+      if (body.job_id !== DEFAULT_JOB_ID && body.hourly_rate !== undefined)
+        db.prepare(
+          "INSERT INTO job_rates(id,job_id,employee_id,kind,date,hourly_rate,reason) VALUES(?,?,?,'monthly',?,?,?)",
+        ).run(
+          randomUUID(),
+          body.job_id,
+          id,
+          rateMonth.parse(body.effective_from),
+          body.hourly_rate,
+          "최초 등록",
+        );
+      if (body.job_id === DEFAULT_JOB_ID && body.hourly_rate !== undefined)
+        db.prepare("INSERT INTO rates VALUES(?,?,?,?,?,?)").run(
+          randomUUID(),
+          id,
+          body.effective_from,
+          body.hourly_rate,
+          "최초 등록",
+          new Date().toISOString(),
+        );
       audit(db, req.admin!.id, "employee.create", id, { ...body });
     });
     res.status(201).json({ id });
+  });
+  admin.get("/jobs", (_req, res) => res.json(jobCatalog(db)));
+  function ensureJobName(name: string, except = "") {
+    if (
+      one(
+        db,
+        "SELECT id FROM job_roles WHERE active=1 AND name=? COLLATE NOCASE AND id<>?",
+        name,
+        except,
+      )
+    )
+      fail(409, "이미 사용 중인 직무 이름입니다.");
+  }
+  admin.post("/jobs", (req: Authed, res) => {
+    const body = z
+      .object({ name: jobName, hourly_rate: hourlyRate, date: rateMonth })
+      .parse(req.body);
+    const id = randomUUID();
+    transaction(db, () => {
+      ensureJobName(body.name);
+      db.prepare("INSERT INTO job_roles(id,name) VALUES(?,?)").run(
+        id,
+        body.name,
+      );
+      db.prepare(
+        "INSERT INTO job_rates(id,job_id,kind,date,hourly_rate,reason) VALUES(?,?,'monthly',?,?,?)",
+      ).run(randomUUID(), id, body.date, body.hourly_rate, "최초 등록");
+      audit(db, req.admin!.id, "job.create", id, body);
+    });
+    res.status(201).json({ id });
+  });
+  admin.patch("/jobs/:id", (req: Authed, res) => {
+    const id = idSchema.parse(req.params.id);
+    const body = z
+      .object({
+        name: jobName,
+        active: z.boolean(),
+        revision: z.number().int().positive(),
+      })
+      .parse(req.body);
+    if (id === DEFAULT_JOB_ID)
+      fail(400, "기본 직무 조교는 이름 변경하거나 보관할 수 없습니다.");
+    transaction(db, () => {
+      const before = one<{ name: string; active: number; revision: number }>(
+        db,
+        "SELECT * FROM job_roles WHERE id=?",
+        id,
+      );
+      if (!before) fail(404, "직무를 찾을 수 없습니다.");
+      if (before.revision !== body.revision)
+        fail(409, "직무가 변경됐습니다. 새로고침해 주세요.");
+      if (body.active) ensureJobName(body.name, id);
+      else if (before.active) {
+        if (
+          one(
+            db,
+            `SELECT 1 FROM employee_jobs ej JOIN employees e ON e.id=ej.employee_id
+            WHERE ej.job_id=? AND ej.active=1 AND e.active=1`,
+            id,
+          )
+        )
+          fail(
+            409,
+            "재직 직원에게 배정된 직무입니다. 직원·시급에서 배정을 먼저 해제해 주세요.",
+          );
+        if (
+          one(
+            db,
+            `SELECT 1 FROM shifts s JOIN shift_jobs sj ON sj.shift_id=s.id
+            WHERE sj.job_id=? AND s.voided=0 AND s.ended_at IS NULL`,
+            id,
+          )
+        )
+          fail(409, "이 직무의 진행 중인 근무를 먼저 마감해 주세요.");
+        // Keep history available while preventing a restored role from silently reappearing.
+        db.prepare(
+          "UPDATE employees SET revision=revision+1 WHERE id IN (SELECT employee_id FROM employee_jobs WHERE job_id=? AND active=1)",
+        ).run(id);
+        db.prepare(
+          "UPDATE employee_jobs SET active=0,is_default=0 WHERE job_id=?",
+        ).run(id);
+      }
+      db.prepare(
+        "UPDATE job_roles SET name=?,active=?,revision=revision+1 WHERE id=?",
+      ).run(body.name, Number(body.active), id);
+      audit(db, req.admin!.id, "job.update", id, { before, after: body });
+    });
+    res.json({ ok: true });
+  });
+  admin.put("/employees/:id/jobs", (req: Authed, res) => {
+    const employeeId = idSchema.parse(req.params.id);
+    const body = z
+      .object({
+        job_ids: z.array(idSchema).min(1).max(30),
+        default_job_id: idSchema,
+        revision: z.number().int().positive(),
+      })
+      .parse(req.body);
+    const jobIds = [...new Set(body.job_ids)];
+    if (!jobIds.includes(body.default_job_id))
+      fail(400, "배정한 직무 중에 기본 직무를 선택해 주세요.");
+    transaction(db, () => {
+      const employee = one<{ revision: number }>(
+        db,
+        "SELECT revision FROM employees WHERE id=?",
+        employeeId,
+      );
+      if (!employee) fail(404, "직원을 찾을 수 없습니다.");
+      if (employee.revision !== body.revision)
+        fail(409, "직원 정보가 변경됐습니다. 새로고침해 주세요.");
+      const before = employeeJobAssignments(db, employeeId);
+      if (
+        jobIds.some(
+          (id) =>
+            !one(db, "SELECT id FROM job_roles WHERE id=? AND active=1", id),
+        )
+      )
+        fail(409, "보관됐거나 없는 직무가 포함돼 있습니다. 새로고침해 주세요.");
+      db.prepare(
+        "UPDATE employee_jobs SET active=0,is_default=0 WHERE employee_id=?",
+      ).run(employeeId);
+      if (before.some((job) => job.id === DEFAULT_JOB_ID))
+        db.prepare("INSERT OR IGNORE INTO employee_jobs VALUES(?,?,0,0)").run(
+          employeeId,
+          DEFAULT_JOB_ID,
+        );
+      const assign = db.prepare(`INSERT INTO employee_jobs VALUES(?,?,1,?)
+        ON CONFLICT(employee_id,job_id) DO UPDATE SET active=1,is_default=excluded.is_default`);
+      for (const id of jobIds)
+        assign.run(employeeId, id, Number(id === body.default_job_id));
+      db.prepare("UPDATE employees SET revision=revision+1 WHERE id=?").run(
+        employeeId,
+      );
+      audit(db, req.admin!.id, "job.assign", employeeId, {
+        before,
+        after: body,
+      });
+    });
+    res.json({ ok: true });
+  });
+  admin.put("/jobs/:id/rates", (req: Authed, res) => {
+    const jobId = idSchema.parse(req.params.id);
+    const body = z
+      .object({
+        employee_id: idSchema.nullable(),
+        kind: z.enum(["monthly", "day"]),
+        date,
+        hourly_rate: hourlyRate.nullable(),
+        expected_id: idSchema.nullable(),
+        revision: z.number().int().positive().nullable(),
+        reason,
+      })
+      .parse(req.body);
+    if (body.kind === "monthly") rateMonth.parse(body.date);
+    if (!body.employee_id && (body.kind === "day" || body.hourly_rate === null))
+      fail(400, "직무 기본 시급은 적용 월과 금액이 필요합니다.");
+    if (jobId === DEFAULT_JOB_ID && body.employee_id)
+      fail(400, "조교 개인 시급은 직원·시급에서 변경해 주세요.");
+    transaction(db, () => {
+      if (!one(db, "SELECT id FROM job_roles WHERE id=?", jobId))
+        fail(404, "직무를 찾을 수 없습니다.");
+      if (
+        body.employee_id &&
+        !one(
+          db,
+          "SELECT 1 FROM employee_jobs WHERE employee_id=? AND job_id=?",
+          body.employee_id,
+          jobId,
+        )
+      )
+        fail(409, "직원에게 이 직무를 먼저 배정해 주세요.");
+      const before = one<JobRate>(
+        db,
+        "SELECT * FROM job_rates WHERE job_id=? AND employee_id IS ? AND kind=? AND date=?",
+        jobId,
+        body.employee_id,
+        body.kind,
+        body.date,
+      );
+      if (
+        (before?.id ?? null) !== body.expected_id ||
+        (before?.revision ?? null) !== body.revision
+      )
+        fail(409, "시급이 변경됐습니다. 새로고침 후 다시 확인해 주세요.");
+      if (body.kind === "day" && body.hourly_rate === null) {
+        if (!before) fail(404, "해제할 하루 시급이 없습니다.");
+        db.prepare("DELETE FROM job_rates WHERE id=?").run(before.id);
+      } else if (before) {
+        db.prepare(
+          "UPDATE job_rates SET hourly_rate=?,reason=?,revision=revision+1 WHERE id=?",
+        ).run(body.hourly_rate, body.reason, before.id);
+      } else {
+        db.prepare(
+          "INSERT INTO job_rates(id,job_id,employee_id,kind,date,hourly_rate,reason) VALUES(?,?,?,?,?,?,?)",
+        ).run(
+          randomUUID(),
+          jobId,
+          body.employee_id,
+          body.kind,
+          body.date,
+          body.hourly_rate,
+          body.reason,
+        );
+      }
+      audit(db, req.admin!.id, "job.rate", jobId, { before, after: body });
+    });
+    res.json({ ok: true });
   });
   admin.patch("/employees/:id", (req: Authed, res) => {
     const body = employeeSchema
@@ -562,6 +829,8 @@ export function registerRoutes(
         ) || fail(404, "직원을 찾을 수 없습니다.");
       if (before.revision !== body.revision)
         fail(409, "다른 관리자가 직원 정보를 수정했습니다. 새로고침해 주세요.");
+      if (body.active && !assignedJobs(db, id).length)
+        fail(409, "재직으로 변경하기 전에 사용 가능한 직무를 배정해 주세요.");
       if (
         !body.active &&
         one(
@@ -779,12 +1048,48 @@ export function registerRoutes(
     );
     if (overlap) fail(409, "같은 직원의 다른 근무 구간과 겹칩니다.");
   }
+  function shiftJob(shiftId: string) {
+    return (
+      one<{ job_id: string }>(
+        db,
+        "SELECT job_id FROM shift_jobs WHERE shift_id=?",
+        shiftId,
+      )?.job_id ?? DEFAULT_JOB_ID
+    );
+  }
+  function setShiftJob(shiftId: string, jobId: string) {
+    if (jobId === DEFAULT_JOB_ID)
+      db.prepare("DELETE FROM shift_jobs WHERE shift_id=?").run(shiftId);
+    else
+      db.prepare(
+        "INSERT INTO shift_jobs VALUES(?,?) ON CONFLICT(shift_id) DO UPDATE SET job_id=excluded.job_id",
+      ).run(shiftId, jobId);
+  }
+  function resolveJob(
+    employeeId: string,
+    requested: string | null | undefined,
+    historical: boolean,
+  ) {
+    const available = historical
+      ? employeeJobAssignments(db, employeeId)
+      : assignedJobs(db, employeeId);
+    if (requested && available.some((job) => job.id === requested))
+      return requested;
+    if (
+      !requested &&
+      available.length === 1 &&
+      available[0].id === DEFAULT_JOB_ID
+    )
+      return DEFAULT_JOB_ID;
+    fail(409, "이 직원의 근무 직무를 확인해 주세요.");
+  }
   admin.post("/records", (req: Authed, res) => {
     const body = shiftSchema.parse(req.body);
     const id = randomUUID();
     transaction(db, () => {
       if (!one(db, "SELECT id FROM employees WHERE id=?", body.employee_id))
         fail(404, "직원을 찾을 수 없습니다.");
+      const jobId = resolveJob(body.employee_id, body.job_id, true);
       validateShift(body);
       db.prepare("INSERT INTO shifts VALUES(?,?,?,?,?,?,?,?,?,?)").run(
         id,
@@ -798,7 +1103,8 @@ export function registerRoutes(
         0,
         new Date().toISOString(),
       );
-      audit(db, req.admin!.id, "shift.create", id, body);
+      setShiftJob(id, jobId);
+      audit(db, req.admin!.id, "shift.create", id, { ...body, job_id: jobId });
       replaceShiftBreaks(db, id, body.breaks ?? []);
     });
     res.status(201).json({ id });
@@ -815,6 +1121,11 @@ export function registerRoutes(
       if (!one(db, "SELECT id FROM employees WHERE id=?", body.employee_id))
         fail(404, "직원을 찾을 수 없습니다.");
       const savedBreaks = attachShiftBreaks(db, [before])[0].breaks!;
+      const previousJob = shiftJob(id);
+      const jobId =
+        body.employee_id === before.employee_id && !body.job_id
+          ? previousJob
+          : resolveJob(body.employee_id, body.job_id, true);
       // An older open tab must not silently erase precise break information.
       if (body.breaks === undefined) body.breaks = savedBreaks;
       validateShift(body, id);
@@ -829,9 +1140,10 @@ export function registerRoutes(
         id,
       );
       replaceShiftBreaks(db, id, body.breaks);
+      setShiftJob(id, jobId);
       audit(db, req.admin!.id, "shift.update", id, {
-        before: { ...before, breaks: savedBreaks },
-        after: body,
+        before: { ...before, breaks: savedBreaks, job_id: previousJob },
+        after: { ...body, job_id: jobId },
       });
     });
     res.json({ ok: true });
@@ -861,7 +1173,11 @@ export function registerRoutes(
     res.json(
       db
         .prepare(
-          "SELECT c.*,e.name,d.name AS device_name FROM clock_events c JOIN employees e ON e.id=c.employee_id JOIN devices d ON d.id=c.device_id WHERE c.status='pending' ORDER BY c.captured_at,c.received_at",
+          `SELECT c.*,e.name,d.name AS device_name,cj.job_id,j.name AS job_name
+           FROM clock_events c JOIN employees e ON e.id=c.employee_id
+           JOIN devices d ON d.id=c.device_id LEFT JOIN clock_event_jobs cj ON cj.event_id=c.id
+           LEFT JOIN job_roles j ON j.id=cj.job_id
+           WHERE c.status='pending' ORDER BY c.captured_at,c.received_at,c.rowid`,
         )
         .all(),
     ),
@@ -869,17 +1185,7 @@ export function registerRoutes(
   admin.post("/recover-events", (req: Authed, res) => {
     const body = z
       .object({
-        events: z
-          .array(
-            z.object({
-              id: idSchema,
-              employee_id: idSchema,
-              action: z.enum(["in", "out"]),
-              captured_at: instant,
-            }),
-          )
-          .min(1)
-          .max(200),
+        events: z.array(clockSchema).min(1).max(200),
       })
       .parse(req.body);
     let imported = 0,
@@ -900,14 +1206,7 @@ export function registerRoutes(
             400,
             "현재 학원에 없는 직원이 포함돼 있습니다. 파일을 확인해 주세요.",
           );
-        const fingerprint = hash(
-          JSON.stringify({
-            id: event.id,
-            employee_id: event.employee_id,
-            action: event.action,
-            captured_at: event.captured_at,
-          }),
-        );
+        const fingerprint = clockFingerprint(event);
         const prior = one<{ fingerprint: string }>(
           db,
           "SELECT fingerprint FROM clock_events WHERE id=?",
@@ -934,6 +1233,7 @@ export function registerRoutes(
           fingerprint,
           null,
         );
+        storeClockJob(event);
         imported++;
       }
       audit(db, req.admin!.id, "clock.recover", deviceId, {
@@ -944,67 +1244,140 @@ export function registerRoutes(
     });
     res.json({ imported, existing });
   });
-  function applyClock(employeeId: string, action: "in" | "out", at: string) {
+  function clockFingerprint(event: z.infer<typeof clockSchema>) {
+    return hash(
+      JSON.stringify({
+        id: event.id,
+        employee_id: event.employee_id,
+        action: event.action,
+        captured_at: event.captured_at,
+        ...(event.job_id ? { job_id: event.job_id } : {}),
+        ...(event.expected_shift_id
+          ? { expected_shift_id: event.expected_shift_id }
+          : {}),
+      }),
+    );
+  }
+  function storeClockJob(event: z.infer<typeof clockSchema>) {
+    if (event.job_id || event.expected_shift_id)
+      db.prepare("INSERT INTO clock_event_jobs VALUES(?,?,?)").run(
+        event.id,
+        event.job_id ?? null,
+        event.expected_shift_id ?? null,
+      );
+  }
+  function applyClock(
+    event: z.infer<typeof clockSchema>,
+    at: string,
+    historical = false,
+  ) {
+    const { id, employee_id: employeeId, action } = event;
     const open = one<Shift>(
       db,
       "SELECT * FROM shifts WHERE employee_id=? AND ended_at IS NULL AND voided=0",
       employeeId,
     );
-    if (action === "in") {
-      if (open)
-        fail(409, "이미 출근 중입니다. 기존 근무기록을 먼저 정정해 주세요.");
-      validateShift({
-        employee_id: employeeId,
-        started_at: at,
-        ended_at: null,
-        break_minutes: 0,
-        note: "",
-        reason: "출근 입력",
-      });
-      const id = randomUUID();
-      db.prepare("INSERT INTO shifts VALUES(?,?,?,?,?,?,?,?,?,?)").run(
-        id,
-        employeeId,
-        at,
-        null,
-        0,
-        "kiosk",
-        "",
-        1,
-        0,
-        new Date().toISOString(),
+    if (action === "in" && open)
+      fail(409, "이미 출근 중입니다. 기존 근무기록을 먼저 정정해 주세요.");
+    if (action !== "in" && !open)
+      fail(409, "출근 기록이 없습니다. 출근 기록부터 확인해 주세요.");
+    if (
+      (event.expected_shift_id || action === "switch") &&
+      event.expected_shift_id !== open?.id
+    )
+      fail(
+        409,
+        "기기에서 선택한 근무와 현재 진행 중인 근무가 다릅니다. 근무기록을 확인해 주세요.",
       );
-      return id;
-    }
-    if (!open) fail(409, "출근 기록이 없습니다. 출근 기록부터 확인해 주세요.");
-    validateShift(
-      {
-        employee_id: employeeId,
-        started_at: open.started_at,
-        ended_at: at,
-        break_minutes: open.break_minutes,
-        note: open.note,
-        reason: "퇴근 입력",
-      },
-      open.id,
+    const jobId =
+      action === "out"
+        ? null
+        : resolveJob(employeeId, event.job_id, historical);
+    if (action === "switch" && open && jobId === shiftJob(open.id))
+      fail(409, "이미 같은 직무로 근무 중입니다.");
+    if (open)
+      validateShift(
+        {
+          employee_id: employeeId,
+          started_at: open.started_at,
+          ended_at: at,
+          break_minutes: open.break_minutes,
+          breaks: attachShiftBreaks(db, [open])[0].breaks,
+          note: open.note,
+          reason: "근무 종료",
+        },
+        open.id,
+      );
+    if (jobId)
+      validateShift(
+        {
+          employee_id: employeeId,
+          started_at: at,
+          ended_at: null,
+          break_minutes: 0,
+          note: "",
+          reason: "근무 시작",
+        },
+        open?.id,
+      );
+    // Complete validation before writing. Both changes share the event transaction.
+    if (open)
+      db.prepare(
+        "UPDATE shifts SET ended_at=?,revision=revision+1 WHERE id=?",
+      ).run(at, open.id);
+    if (!jobId) return open!.id;
+    db.prepare("INSERT INTO shifts VALUES(?,?,?,?,?,?,?,?,?,?)").run(
+      id,
+      employeeId,
+      at,
+      null,
+      0,
+      "kiosk",
+      "",
+      1,
+      0,
+      new Date().toISOString(),
     );
-    db.prepare(
-      "UPDATE shifts SET ended_at=?,revision=revision+1 WHERE id=?",
-    ).run(at, open.id);
-    return open.id;
+    if (jobId !== DEFAULT_JOB_ID) setShiftJob(id, jobId);
+    return id;
   }
   admin.post("/reviews/:id", (req: Authed, res) => {
     const id = idSchema.parse(req.params.id);
-    const body = z.object({ approve: z.boolean(), reason }).parse(req.body);
+    const body = z
+      .object({ approve: z.boolean(), reason, job_id: idSchema.optional() })
+      .parse(req.body);
     transaction(db, () => {
       const event =
-        one<{ employee_id: string; action: "in" | "out"; captured_at: string }>(
+        one<
+          z.infer<typeof clockSchema> & {
+            received_at: string;
+            event_order: number;
+          }
+        >(
           db,
-          "SELECT * FROM clock_events WHERE id=? AND status='pending'",
+          `SELECT c.*,c.rowid AS event_order,cj.job_id,cj.expected_shift_id FROM clock_events c
+            LEFT JOIN clock_event_jobs cj ON cj.event_id=c.id WHERE c.id=? AND c.status='pending'`,
           id,
         ) || fail(409, "이미 처리했거나 없는 기록입니다.");
+      if (
+        body.approve &&
+        one(
+          db,
+          `SELECT id FROM clock_events WHERE employee_id=? AND status='pending'
+          AND (captured_at,received_at,rowid)<(?,?,?) LIMIT 1`,
+          event.employee_id,
+          event.captured_at,
+          event.received_at,
+          event.event_order,
+        )
+      )
+        fail(409, "같은 직원의 앞선 기록을 먼저 승인하거나 반려해 주세요.");
       const shiftId = body.approve
-        ? applyClock(event.employee_id, event.action, event.captured_at)
+        ? applyClock(
+            { ...event, job_id: body.job_id ?? event.job_id },
+            event.captured_at,
+            true,
+          )
         : null;
       db.prepare("UPDATE clock_events SET status=?,shift_id=? WHERE id=?").run(
         body.approve ? "accepted" : "rejected",
@@ -1448,45 +1821,33 @@ export function registerRoutes(
     });
     res.json({ token, name });
   });
-  app.get("/api/kiosk/roster", kioskLimit, requireDevice, (_req, res) => {
-    res.json({
-      academyName: getPolicy(db).academyName,
-      time: new Date().toISOString(),
-      employees: db
-        .prepare(
-          "SELECT e.id,e.name,e.phone_last4,EXISTS(SELECT 1 FROM shifts s WHERE s.employee_id=e.id AND s.ended_at IS NULL AND s.voided=0) AS working FROM employees e WHERE e.active=1 ORDER BY name",
-        )
-        .all()
-        .map((e) => ({ ...e, working: !!e.working })),
-    });
-  });
+  app.get(
+    "/api/kiosk/roster",
+    kioskLimit,
+    requireDevice,
+    (req: Authed, res) => {
+      res.json({
+        academyName: getPolicy(db).academyName,
+        time: new Date().toISOString(),
+        employees: rosterJobs(db, req.device!.id),
+      });
+    },
+  );
   app.post(
     "/api/kiosk/events",
     kioskLimit,
     requireDevice,
     (req: Authed, res) => {
-      const body = z
-        .object({
-          id: idSchema,
-          employee_id: idSchema,
-          action: z.enum(["in", "out"]),
-          captured_at: instant,
-          offline: z.boolean(),
-        })
+      const body = clockSchema
+        .extend({ offline: z.boolean() })
         .parse(req.body) satisfies ClockEvent;
-      const fingerprint = hash(
-        JSON.stringify({
-          id: body.id,
-          employee_id: body.employee_id,
-          action: body.action,
-          captured_at: body.captured_at,
-        }),
-      );
-      let result: { status: string; review_reason: string };
+      const fingerprint = clockFingerprint(body);
+      let result: ClockResult;
       transaction(db, () => {
         const existing = one<{
-          status: string;
+          status: ClockResult["status"];
           review_reason: string;
+          shift_id: string | null;
           fingerprint: string;
           device_id: string;
         }>(db, "SELECT * FROM clock_events WHERE id=?", body.id);
@@ -1499,6 +1860,7 @@ export function registerRoutes(
           result = {
             status: existing.status,
             review_reason: existing.review_reason,
+            shift_id: existing.shift_id,
           };
           return;
         }
@@ -1514,10 +1876,19 @@ export function registerRoutes(
         else if (body.offline) reviewReason = "인터넷 연결 중단 중 저장된 기록";
         else if (Math.abs(Date.now() - Date.parse(body.captured_at)) > 120000)
           reviewReason = "기기 시각 차이 또는 전송 지연";
+        else if (
+          one(
+            db,
+            "SELECT id FROM clock_events WHERE employee_id=? AND status='pending' AND captured_at<=? LIMIT 1",
+            body.employee_id,
+            body.captured_at,
+          )
+        )
+          reviewReason = "먼저 확인할 출퇴근 기록이 있습니다.";
         let shiftId: string | null = null;
         if (!reviewReason) {
           try {
-            shiftId = applyClock(body.employee_id, body.action, now);
+            shiftId = applyClock(body, now);
           } catch (error) {
             if (error instanceof HttpError) reviewReason = error.message;
             else throw error;
@@ -1536,7 +1907,8 @@ export function registerRoutes(
           fingerprint,
           shiftId,
         );
-        result = { status, review_reason: reviewReason };
+        storeClockJob(body);
+        result = { status, review_reason: reviewReason, shift_id: shiftId };
       });
       res.json(result!);
     },

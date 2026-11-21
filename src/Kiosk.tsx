@@ -10,7 +10,14 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import type { RosterEntry } from "../shared/types.ts";
+import type { ClockEvent, ClockResult, RosterEntry } from "../shared/types.ts";
+import {
+  clockActionLabel,
+  DEFAULT_JOB_ID,
+  type ClockAction,
+  type Job,
+} from "../shared/jobs.ts";
+import { defaultJob, projectRosterEntry } from "./kiosk-jobs.ts";
 import { api, ApiError, download } from "./api.ts";
 import { kioskStore, type Roster } from "./kiosk-store.ts";
 import { SyncRetry } from "./sync-retry.ts";
@@ -35,7 +42,15 @@ export default function Kiosk() {
     time: "",
   });
   const [digits, setDigits] = useState("");
-  const [selected, setSelected] = useState<RosterEntry | null>(null);
+  const [selection, setSelected] = useState<RosterEntry | null>(null);
+  const [queueView, setQueueView] = useState<ClockEvent[]>([]);
+  const selected = selection
+    ? projectRosterEntry(
+        roster.employees.find((employee) => employee.id === selection.id) ??
+          selection,
+        queueView,
+      )
+    : null;
   const [online, setOnline] = useState(navigator.onLine);
   const [now, setNow] = useState(new Date());
   const [pending, setPending] = useState(0);
@@ -73,7 +88,9 @@ export default function Kiosk() {
         setToken((await kioskStore.get<string>("token")) || "");
         const saved = await kioskStore.get<Roster>("roster");
         if (saved) setRoster(saved);
-        setPending((await kioskStore.queue()).length);
+        const queue = await kioskStore.queue();
+        setPending(queue.length);
+        setQueueView(queue);
       } catch {
         setError(
           "기기 저장소를 사용할 수 없습니다. 일반 Chrome 창에서 열어 주세요.",
@@ -106,6 +123,7 @@ export default function Kiosk() {
       try {
         const queue = await kioskStore.queue();
         setPending(queue.length);
+        setQueueView(queue);
         const deferredEmployees = new Set<string>();
         let deferred = false,
           attempted = false;
@@ -120,26 +138,24 @@ export default function Kiosk() {
           }
           attempted = true;
           try {
-            const result = await api<{ status: string; review_reason: string }>(
-              "/kiosk/events",
-              {
-                method: "POST",
-                headers: { Authorization: "Bearer " + token },
-                body: JSON.stringify(item),
-              },
-            );
+            const result = await api<ClockResult>("/kiosk/events", {
+              method: "POST",
+              headers: { Authorization: "Bearer " + token },
+              body: JSON.stringify(item),
+            });
             if (
               !["accepted", "pending", "rejected"].includes(result.status) ||
               typeof result.review_reason !== "string"
             )
               throw new Error("출퇴근 응답을 확인하지 못했습니다.");
-            await kioskStore.remove(item.id);
+            const confirmed = await kioskStore.acknowledge(item, result);
+            if (confirmed) setRoster(confirmed);
             setPending((await kioskStore.queue()).length);
             setMessage({
               kind: result.status === "accepted" ? "success" : "review",
               text:
                 result.status === "accepted"
-                  ? `${item.action === "in" ? "출근" : "퇴근"} 완료`
+                  ? `${clockActionLabel[item.action]} 완료`
                   : `관리자 확인 대기 · ${result.review_reason}`,
             });
           } catch (err) {
@@ -164,6 +180,7 @@ export default function Kiosk() {
         }
         if (attempted || Date.now() - lastRosterRead.current >= 60000)
           await refreshRoster();
+        setQueueView(await kioskStore.queue());
         setError(
           deferred
             ? "직원 정보 확인이 필요한 미전송 기록이 있습니다. ‘기록 보관’ 후 관리자에게 확인해 주세요."
@@ -303,7 +320,7 @@ export default function Kiosk() {
       setBusy(false);
     }
   }
-  async function clock(action: "in" | "out") {
+  async function clock(action: ClockAction, job?: Job) {
     if (!selected || busy || revoked || writing.current || isApplyingUpdate())
       return;
     writing.current = true;
@@ -316,11 +333,17 @@ export default function Kiosk() {
         action,
         captured_at: new Date().toISOString(),
         offline: !online,
+        ...(job ? { job_id: job.id } : {}),
+        ...(action !== "in" && selected.open_shift_id
+          ? { expected_shift_id: selected.open_shift_id }
+          : {}),
       });
-      setPending((await kioskStore.queue()).length);
+      const queue = await kioskStore.queue();
+      setPending(queue.length);
+      setQueueView(queue);
       setMessage({
         kind: "local",
-        text: `${action === "in" ? "출근" : "퇴근"} 기기 저장 · ${online ? "전송 중" : "전송 대기"}`,
+        text: `${clockActionLabel[action]} 기기 저장 · ${online ? "전송 중" : "전송 대기"}`,
       });
       setSelected(null);
       setDigits("");
@@ -460,25 +483,61 @@ export default function Kiosk() {
                   </div>
                   <h2>{selected.name}</h2>
                   <span className={`badge ${selected.working ? "green" : ""}`}>
-                    최근 상태 · {selected.working ? "근무 중" : "퇴근"}
+                    {selected.working
+                      ? `${selected.open_job?.name ?? defaultJob.name} · 근무 중`
+                      : "최근 상태 · 퇴근"}
                   </span>
-                  {(!online || pending > 0) && (
-                    <p className="muted">마지막 전송 기준</p>
+                  {(!online || pending > 0 || !!selected.pending?.length) && (
+                    <p className="muted">
+                      {selected.pending?.length
+                        ? "관리자 확인 대기 기록 포함"
+                        : "기기 저장 기록 기준"}
+                    </p>
                   )}
-                  <button
-                    className="button primary big"
-                    disabled={busy || revoked}
-                    onClick={() => void clock("in")}
-                  >
-                    출근 <ArrowRight size={22} />
-                  </button>
-                  <button
-                    className="button secondary big"
-                    disabled={busy || revoked}
-                    onClick={() => void clock("out")}
-                  >
-                    퇴근 <Check size={22} />
-                  </button>
+                  {!selected.working &&
+                    (selected.jobs ?? [defaultJob]).map((job) => (
+                      <button
+                        key={job.id}
+                        className="button primary big"
+                        disabled={busy || revoked}
+                        onClick={() => void clock("in", job)}
+                      >
+                        {job.id === DEFAULT_JOB_ID &&
+                        selected.jobs?.length === 1
+                          ? "출근"
+                          : job.name + " 출근"}
+                        <ArrowRight size={22} />
+                      </button>
+                    ))}
+                  {selected.working && (
+                    <>
+                      <button
+                        className="button primary big"
+                        disabled={busy || revoked}
+                        onClick={() => void clock("out")}
+                      >
+                        퇴근 <Check size={22} />
+                      </button>
+                      {!!selected.open_shift_id &&
+                        selected.jobs
+                          ?.filter((job) => job.id !== selected.open_job?.id)
+                          .map((job) => (
+                            <button
+                              key={job.id}
+                              className="button secondary big"
+                              disabled={busy || revoked}
+                              onClick={() => void clock("switch", job)}
+                            >
+                              직무 전환 · {job.name} <ArrowRight size={22} />
+                            </button>
+                          ))}
+                    </>
+                  )}
+                  {!selected.working && !selected.jobs?.length && (
+                    <Alert>
+                      배정된 직무가 없습니다. 관리자에게 확인해 주세요.
+                    </Alert>
+                  )}
                 </div>
               ) : (
                 <>

@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 test("operator administration, paired tablet, offline reload and manager access", async ({
   browser,
 }) => {
-  test.setTimeout(90000);
+  test.setTimeout(105000);
   mkdirSync(".tmp", { recursive: true });
   const errors: string[] = [];
   const adminContext = await browser.newContext({
@@ -54,7 +54,7 @@ test("operator administration, paired tablet, offline reload and manager access"
     "/api/admin/attendance-week",
   ]);
   await admin.getByRole("button", { name: "직원·시급", exact: true }).click();
-  await admin.getByRole("button", { name: "조교 등록", exact: true }).click();
+  await admin.getByRole("button", { name: "직원 등록", exact: true }).click();
   let dialog = admin.getByRole("dialog");
   await dialog.getByLabel("이름", { exact: true }).fill("김조교");
   await dialog.getByLabel("휴대전화 뒷자리").fill("0012");
@@ -757,15 +757,6 @@ test("operator administration, paired tablet, offline reload and manager access"
       admin.getByText("백업의 검사값이 일치하지 않습니다."),
     ).toBeVisible();
   }
-  // Exercise the actual Node/Cloudflare request limiter without writing attendance.
-  const burst = await Promise.all(
-    Array.from({ length: 185 }, () =>
-      kioskContext.request.get("/api/kiosk/roster"),
-    ),
-  );
-  const limited = burst.filter((response) => response.status() === 429);
-  expect(limited.length).toBeGreaterThan(0);
-  expect(Number(limited[0].headers()["retry-after"])).toBeGreaterThan(0);
   // A record-page timer should not reload all employee, salary and audit history.
   await admin.bringToFront();
   await admin.clock.install();
@@ -1047,6 +1038,124 @@ test("operator administration, paired tablet, offline reload and manager access"
     active: deviceBefore.active,
     created_at: deviceBefore.created_at,
   });
+  await test.step("manages allowed jobs and switches an offline shift", async () => {
+    for (const [name, rate] of [
+      ["데스크", "12000"],
+      ["필스터디", "14000"],
+    ]) {
+      await admin.getByRole("button", { name: "직무 추가" }).click();
+      const jobDialog = admin.getByRole("dialog");
+      await jobDialog.getByLabel("직무 이름").fill(name);
+      await jobDialog.getByLabel("공통 시급 (원)").fill(rate);
+      await jobDialog.getByLabel("적용 월").fill("2026-01");
+      await jobDialog.getByRole("button", { name: "저장하기" }).click();
+      await expect(jobDialog).toBeHidden();
+      await expect(
+        admin.getByRole("row").filter({ hasText: name }),
+      ).toBeVisible();
+    }
+    const multi = await demoEmployee("겸직 검증", "0037");
+    await demoEmployee("데스크 전담 검증", "0038");
+    await admin.getByRole("button", { name: "직원·시급", exact: true }).click();
+    for (const name of ["겸직 검증", "데스크 전담 검증"]) {
+      await admin
+        .getByRole("row")
+        .filter({ hasText: name })
+        .getByRole("button", { name: "직무 배정" })
+        .click();
+      const assignment = admin.getByRole("dialog");
+      await assignment
+        .getByRole("checkbox", { name: "데스크", exact: true })
+        .check();
+      if (name === "겸직 검증")
+        await assignment
+          .getByRole("checkbox", { name: "필스터디", exact: true })
+          .check();
+      await assignment
+        .getByRole("checkbox", { name: "조교", exact: true })
+        .uncheck();
+      await expect(
+        assignment.getByLabel("기본 직무").locator("option:checked"),
+      ).toHaveText("데스크");
+      await assignment.getByRole("button", { name: "저장하기" }).click();
+      await expect(assignment).toBeHidden();
+    }
+    async function selectJobTester(digits: string, name: string) {
+      for (const digit of digits)
+        await kiosk.getByRole("button", { name: digit, exact: true }).click();
+      await kiosk.getByRole("button", { name }).click();
+    }
+    const synced = kiosk.waitForResponse(
+      (res) => res.url().endsWith("/api/kiosk/roster") && res.ok(),
+    );
+    await kiosk.reload();
+    await synced;
+    await selectJobTester("0038", "데스크 전담 검증");
+    await expect(
+      kiosk.getByRole("button", { name: "데스크 출근" }),
+    ).toBeVisible();
+    await expect(
+      kiosk.getByRole("button", { name: "필스터디 출근" }),
+    ).toHaveCount(0);
+    await kiosk.getByRole("button", { name: "다시 입력" }).click();
+    await selectJobTester("0037", "겸직 검증");
+    await expect(
+      kiosk.getByRole("button", { name: "필스터디 출근" }),
+    ).toBeVisible();
+    await kiosk.getByRole("button", { name: "데스크 출근" }).click();
+    await expect(kiosk.getByText("출근 완료", { exact: true })).toBeVisible();
+    await kioskContext.setOffline(true);
+    await selectJobTester("0037", "겸직 검증");
+    await kiosk
+      .getByRole("button", { name: "직무 전환 · 필스터디", exact: true })
+      .click();
+    await expect(
+      kiosk.getByText("전송 대기 1건", { exact: true }),
+    ).toBeVisible();
+    await kiosk.reload();
+    await selectJobTester("0037", "겸직 검증");
+    await expect(
+      kiosk.getByText("필스터디 · 근무 중", { exact: true }),
+    ).toBeVisible();
+    await kiosk.getByRole("button", { name: "퇴근", exact: true }).click();
+    await expect(
+      kiosk.getByText("전송 대기 2건", { exact: true }),
+    ).toBeVisible();
+    await kioskContext.setOffline(false);
+    await expect(
+      kiosk.getByText("전송 대기 0건", { exact: true }),
+    ).toBeVisible();
+    const reviews: {
+      id: string;
+      action: string;
+      employee_id: string;
+      job_name?: string;
+    }[] = await (await adminContext.request.get("/api/admin/reviews")).json();
+    const pending = reviews.filter((review) => review.employee_id === multi);
+    expect(pending.map((review) => [review.action, review.job_name])).toEqual([
+      ["switch", "필스터디"],
+      ["out", null],
+    ]);
+    for (const review of pending) {
+      const response = await adminContext.request.post(
+        `/api/admin/reviews/${review.id}`,
+        {
+          data: { approve: true, reason: "오프라인 직무 전환 확인" },
+          headers: { "X-Requested-With": "Feeledu" },
+        },
+      );
+      expect(response.status(), await response.text()).toBe(200);
+    }
+  });
+  // Leave the shared kiosk rate-limiter saturated only after kiosk interactions.
+  const burst = await Promise.all(
+    Array.from({ length: 185 }, () =>
+      kioskContext.request.get("/api/kiosk/roster"),
+    ),
+  );
+  const limited = burst.filter((response) => response.status() === 429);
+  expect(limited.length).toBeGreaterThan(0);
+  expect(Number(limited[0].headers()["retry-after"])).toBeGreaterThan(0);
   expect(errors).toEqual([]);
   await managerContext.close();
   await kioskContext.close();

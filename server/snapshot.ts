@@ -1,17 +1,31 @@
 import {
   snapshotSchema as schema,
   snapshotTables,
+  tablesForSnapshotSchema,
 } from "../shared/snapshot-format.ts";
 export { snapshotTables } from "../shared/snapshot-format.ts";
 import { createHash } from "node:crypto";
-import { transaction, type Db } from "./database.ts";
+import { seedDefaultJob, transaction, type Db } from "./database.ts";
+import { DEFAULT_JOB_ID } from "../shared/jobs.ts";
 import { attachShiftBreaks, breakError } from "./shift-breaks.ts";
 import type { Shift } from "../shared/types.ts";
 const checksum = (tables: unknown) =>
   createHash("sha256").update(JSON.stringify(tables)).digest("hex");
 export function exportSnapshot(db: Db) {
+  const schemaVersion = db
+    .prepare("SELECT MAX(version) AS version FROM schema_version")
+    .get()?.version;
+  if (
+    schemaVersion !== 3 &&
+    schemaVersion !== 4 &&
+    schemaVersion !== 5 &&
+    schemaVersion !== 6
+  )
+    throw new Error(
+      "백업을 만들기 전에 앱에서 데이터베이스를 업데이트해 주세요.",
+    );
   const tables = Object.fromEntries(
-    snapshotTables.map((table) => [
+    tablesForSnapshotSchema(schemaVersion).map((table) => [
       table,
       db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
     ]),
@@ -19,7 +33,7 @@ export function exportSnapshot(db: Db) {
   return {
     format: "feeledu-snapshot" as const,
     version: 1 as const,
-    schema: 5 as const,
+    schema: schemaVersion,
     created_at: new Date().toISOString(),
     tables,
     checksum: checksum(tables),
@@ -41,13 +55,18 @@ export function importSnapshotIntoEmptyDatabase(db: Db, input: unknown) {
       snapshotTables.some(
         (table) =>
           table !== "settings" &&
-          db.prepare(`SELECT 1 AS found FROM ${table} LIMIT 1`).get(),
+          (table === "job_roles"
+            ? db
+                .prepare("SELECT 1 FROM job_roles WHERE id<>? LIMIT 1")
+                .get(DEFAULT_JOB_ID)
+            : db.prepare(`SELECT 1 AS found FROM ${table} LIMIT 1`).get()),
       )
     )
       throw new Error(
         "빈 운영 DB에만 이전할 수 있습니다. 기존 기록은 덮어쓰지 않습니다.",
       );
     db.prepare("DELETE FROM settings").run();
+    db.prepare("DELETE FROM job_roles WHERE id=?").run(DEFAULT_JOB_ID);
     // All table and column identifiers come from our schema, never the upload.
     for (const table of snapshotTables) {
       const columns = db
@@ -65,6 +84,13 @@ export function importSnapshotIntoEmptyDatabase(db: Db, input: unknown) {
         ).run(...columns.map((column) => item[column]));
       }
     }
+    seedDefaultJob(db);
+    if (
+      !db
+        .prepare("SELECT 1 FROM job_roles WHERE id=? AND active=1")
+        .get(DEFAULT_JOB_ID)
+    )
+      throw new Error("백업의 기본 직무가 올바르지 않습니다.");
     if (db.prepare("PRAGMA foreign_key_check").all().length)
       throw new Error("백업의 연결된 기록을 확인해 주세요.");
     for (const shift of attachShiftBreaks(

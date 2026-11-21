@@ -17,6 +17,11 @@ import { Alert, Field, Help } from "../ui.tsx";
 import { useAdmin } from "./context.tsx";
 import { localDateTime, toShiftInstant } from "./shift-form-time.ts";
 import { rateMonthVersion } from "../../shared/rate-month.ts";
+import {
+  clockActionLabel,
+  DEFAULT_JOB_ID,
+  DEFAULT_JOB_NAME,
+} from "../../shared/jobs.ts";
 export { localDateTime } from "./shift-form-time.ts";
 
 export function ActionForm({
@@ -61,6 +66,11 @@ export function ActionForm({
 export function EmployeeForm({ employee }: { employee?: Employee }) {
   const { mutate, data } = useAdmin();
   const [last4, setLast4] = useState(employee?.phone_last4 || "");
+  const [jobId, setJobId] = useState(DEFAULT_JOB_ID);
+  const [rateMonth, setRateMonth] = useState(seoulDate().slice(0, 7));
+  const commonRate = data.jobs
+    .find((job) => job.id === jobId)
+    ?.rates.find((rate) => rate.date <= rateMonth + "-01")?.hourly_rate;
   const duplicate = data.employees.some(
     (e) => e.id !== employee?.id && e.active && e.phone_last4 === last4,
   );
@@ -82,8 +92,11 @@ export function EmployeeForm({ employee }: { employee?: Employee }) {
             ...(employee ? { revision: employee.revision } : {}),
             ...(!employee
               ? {
-                  hourly_rate: Number(form.get("hourly_rate")),
-                  effective_from: form.get("effective_month") + "-01",
+                  job_id: jobId,
+                  ...(form.get("hourly_rate")
+                    ? { hourly_rate: Number(form.get("hourly_rate")) }
+                    : {}),
+                  effective_from: rateMonth + "-01",
                 }
               : {}),
           },
@@ -120,15 +133,39 @@ export function EmployeeForm({ employee }: { employee?: Employee }) {
         </Alert>
       )}
       {!employee && (
+        <Field label="기본 직무">
+          <select
+            value={jobId}
+            onChange={(event) => setJobId(event.target.value)}
+            required
+          >
+            {data.jobs
+              .filter((job) => job.active)
+              .map((job) => (
+                <option key={job.id} value={job.id}>
+                  {job.name}
+                </option>
+              ))}
+          </select>
+        </Field>
+      )}
+      {!employee && (
         <div className="form-grid">
-          <Field label="기본 시급 (원)">
+          <Field
+            label="기본 시급 (원)"
+            hint={
+              commonRate
+                ? `비우면 직무 공통 시급 ${money(commonRate)} 적용`
+                : undefined
+            }
+          >
             <input
               name="hourly_rate"
               type="number"
               min="1"
               max="1000000"
               step="1"
-              required
+              required={!commonRate}
               placeholder="예: 12000"
             />
           </Field>
@@ -136,7 +173,8 @@ export function EmployeeForm({ employee }: { employee?: Employee }) {
             <input
               name="effective_month"
               type="month"
-              defaultValue={seoulDate().slice(0, 7)}
+              value={rateMonth}
+              onChange={(event) => setRateMonth(event.target.value)}
               required
             />
           </Field>
@@ -349,6 +387,13 @@ function RateEditor({
 }
 export function ShiftForm({ shift }: { shift?: Shift }) {
   const { data, mutate } = useAdmin();
+  const [employeeId, setEmployeeId] = useState(shift?.employee_id ?? "");
+  const jobs =
+    data.employees.find((employee) => employee.id === employeeId)?.jobs ?? [];
+  const defaultJob = jobs.find((job) => job.is_default);
+  const [jobId, setJobId] = useState(
+    shift ? (shift.job_id ?? DEFAULT_JOB_ID) : "",
+  );
   const [start, setStart] = useState(
     localDateTime(shift?.started_at || new Date().toISOString()),
   );
@@ -413,7 +458,8 @@ export function ShiftForm({ shift }: { shift?: Shift }) {
         return mutate(
           shift ? `/admin/records/${shift.id}` : "/admin/records",
           {
-            employee_id: form.get("employee_id"),
+            employee_id: employeeId,
+            job_id: jobId,
             started_at: startedAt,
             ended_at: endedAt,
             break_minutes: minutes,
@@ -437,7 +483,18 @@ export function ShiftForm({ shift }: { shift?: Shift }) {
       <Field label="직원">
         <select
           name="employee_id"
-          defaultValue={shift?.employee_id || ""}
+          value={employeeId}
+          onChange={(event) => {
+            setEmployeeId(event.target.value);
+            const assignments =
+              data.employees.find(
+                (employee) => employee.id === event.target.value,
+              )?.jobs ?? [];
+            setJobId(
+              assignments.find((job) => job.is_default)?.id ??
+                (assignments.length === 1 ? assignments[0].id : ""),
+            );
+          }}
           required
         >
           <option value="" disabled>
@@ -451,6 +508,34 @@ export function ShiftForm({ shift }: { shift?: Shift }) {
           ))}
         </select>
       </Field>
+      {!!employeeId && (
+        <Field label="근무 직무">
+          <select
+            value={jobId}
+            onChange={(event) => setJobId(event.target.value)}
+            required
+          >
+            <option value="" disabled>
+              직무 선택
+            </option>
+            {jobs.map((job) => (
+              <option key={job.id} value={job.id}>
+                {job.name}
+                {job.id === defaultJob?.id
+                  ? " (기본)"
+                  : !job.assigned
+                    ? " (이전 배정)"
+                    : ""}
+              </option>
+            ))}
+            {shift &&
+              jobId === DEFAULT_JOB_ID &&
+              !jobs.some((job) => job.id === jobId) && (
+                <option value={DEFAULT_JOB_ID}>{DEFAULT_JOB_NAME}</option>
+              )}
+          </select>
+        </Field>
+      )}
       <div className="form-grid">
         <Field label="출근 시각 (한국 시간)">
           <input
@@ -643,7 +728,11 @@ export function ReviewForm({
   event: ReviewEvent;
   approve: boolean;
 }) {
-  const { mutate } = useAdmin();
+  const { mutate, data } = useAdmin();
+  const jobs =
+    data.employees.find((employee) => employee.id === event.employee_id)
+      ?.jobs ?? [];
+  const chooseJob = approve && event.action !== "out" && jobs.length > 0;
   return (
     <ActionForm
       label={approve ? "기록 승인" : "기록 반려"}
@@ -651,20 +740,47 @@ export function ReviewForm({
         mutate(`/admin/reviews/${event.id}`, {
           approve,
           reason: form.get("reason"),
+          ...(chooseJob ? { job_id: form.get("job_id") } : {}),
         })
       }
     >
       <Alert>
         {event.name} · {localDateTime(event.captured_at).replace("T", " ")} ·{" "}
-        {event.action === "in" ? "출근" : "퇴근"}
+        {clockActionLabel[event.action]}
+        {event.job_name ? ` · ${event.job_name}` : ""}
         <br />
         {event.review_reason}
       </Alert>
       <p className="muted">
         {approve
-          ? "기기 시각으로 반영 · 출근 → 퇴근 순으로 승인"
+          ? "기기에 기록된 시각으로 반영합니다. 같은 직원의 기록은 시간순으로 승인해 주세요."
           : "계산에서 제외 · 기록과 사유 보존"}
       </p>
+      {chooseJob && (
+        <Field label={event.action === "switch" ? "전환할 직무" : "근무 직무"}>
+          <select
+            name="job_id"
+            required
+            defaultValue={
+              jobs.some((job) => job.id === event.job_id)
+                ? event.job_id!
+                : jobs.length === 1
+                  ? jobs[0].id
+                  : ""
+            }
+          >
+            <option value="" disabled>
+              직무 확인
+            </option>
+            {jobs.map((job) => (
+              <option key={job.id} value={job.id}>
+                {job.name}
+                {job.assigned ? "" : " (이전 배정)"}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
       <Field label="확인 사유">
         <textarea name="reason" required minLength={2} maxLength={500} />
       </Field>

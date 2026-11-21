@@ -45,6 +45,12 @@ import WeeklyAttendance from "./WeeklyAttendance.tsx";
 import { UpdateHistoryButton } from "../UpdateCenter.tsx";
 import { holidayName, workedDates } from "../../shared/workdays.ts";
 import { adminRoleLabel } from "../../shared/admin-role.ts";
+import {
+  clockActionLabel,
+  DEFAULT_JOB_ID,
+  DEFAULT_JOB_NAME,
+} from "../../shared/jobs.ts";
+import { currentJobRate, EmployeeJobsForm, JobRateForm } from "./JobForms.tsx";
 
 const navigation = [
   { id: "overview", label: "대시보드", icon: LayoutDashboard },
@@ -59,6 +65,10 @@ const actionLabels: Record<string, string> = {
   login: "로그인",
   "employee.create": "직원 등록",
   "employee.update": "직원 수정",
+  "job.create": "직무 추가",
+  "job.update": "직무 수정",
+  "job.assign": "직원 직무 배정",
+  "job.rate": "직무 시급 변경",
   "rate.update": "시급 변경",
   "rate.month": "월 시급 변경",
   "dayrate.update": "하루 시급 변경",
@@ -198,14 +208,21 @@ export default function AdminApp({
           holidayName(date, data.holidays, data.policy),
         )
       : [];
-  const specialDates = (shift: Shift) =>
-    data
+  const specialDates = (shift: Shift) => {
+    const employee = data?.employees.find(
+      (employee) => employee.id === shift.employee_id,
+    );
+    const rates = shift.job_id
+      ? employee?.jobs
+          ?.find((job) => job.id === shift.job_id)
+          ?.rates.filter((rate) => rate.kind === "day")
+      : employee?.day_rates;
+    return rates?.length
       ? workedDates(shift, from, to).filter((date) =>
-          data.employees
-            .find((employee) => employee.id === shift.employee_id)
-            ?.day_rates?.some((rate) => rate.date === date),
+          rates.some((rate) => rate.date === date),
         )
       : [];
+  };
   const records =
     data?.records.filter(
       (r) =>
@@ -291,6 +308,21 @@ export default function AdminApp({
     );
   };
   function payrollDetail(row: PayrollRow) {
+    const byJob = new Map<
+      string,
+      { name: string; seconds: number; amount: number }
+    >();
+    for (const day of row.dailyDetails ?? []) {
+      const id = day.jobId ?? DEFAULT_JOB_ID;
+      const job = byJob.get(id) ?? {
+        name: day.jobName ?? DEFAULT_JOB_NAME,
+        seconds: 0,
+        amount: 0,
+      };
+      job.seconds += day.seconds;
+      job.amount += day.base + day.holiday + (day.night ?? 0);
+      byJob.set(id, job);
+    }
     open(
       `${row.name} · 급여 계산 내역`,
       <div className="form-body">
@@ -310,6 +342,18 @@ export default function AdminApp({
           <strong>합계</strong>
           <strong>{money(row.total)}</strong>
         </div>
+        {byJob.size > 1 && (
+          <div className="rate-history">
+            <strong>직무별 근무 금액 (기본급·휴일·야간)</strong>
+            {[...byJob].map(([id, job]) => (
+              <div key={id}>
+                <span>{job.name}</span>
+                <b>{money(Math.round(job.amount))}</b>
+                <small>{hours(job.seconds)}</small>
+              </div>
+            ))}
+          </div>
+        )}
         {row.weeklyDetails.length > 0 && (
           <div className="rate-history">
             <strong>주휴 계산 근거</strong>
@@ -331,6 +375,7 @@ export default function AdminApp({
               <thead>
                 <tr>
                   <th>날짜</th>
+                  <th>직무</th>
                   <th>시간</th>
                   <th>시급</th>
                   <th>기본급</th>
@@ -341,13 +386,14 @@ export default function AdminApp({
               </thead>
               <tbody>
                 {row.dailyDetails.map((day) => (
-                  <tr key={day.date}>
+                  <tr key={day.date + (day.jobId ?? DEFAULT_JOB_ID)}>
                     <td>
                       {day.date}
                       {day.holidayName && (
                         <small className="cell-note">{day.holidayName}</small>
                       )}
                     </td>
+                    <td>{day.jobName ?? DEFAULT_JOB_NAME}</td>
                     <td>{hours(day.seconds)}</td>
                     <td>
                       {money(day.hourlyRate)}
@@ -475,6 +521,7 @@ export default function AdminApp({
           <thead>
             <tr>
               <th>직원</th>
+              <th>직무</th>
               <th>근무일</th>
               <th>출근</th>
               <th>퇴근</th>
@@ -497,6 +544,7 @@ export default function AdminApp({
                     <b>{s.name}</b>
                   </span>
                 </td>
+                <td>{s.job_name ?? DEFAULT_JOB_NAME}</td>
                 <td>
                   {recordDate(s.started_at)}
                   {!compact &&
@@ -713,7 +761,7 @@ export default function AdminApp({
                   <WeeklyAttendance
                     refreshKey={revision}
                     expired={expired}
-                    onAdd={() => open("조교 등록", <EmployeeForm />)}
+                    onAdd={() => open("직원 등록", <EmployeeForm />)}
                     onRecords={(a, b, id) => {
                       if (
                         id &&
@@ -740,7 +788,7 @@ export default function AdminApp({
                               {data.reviews.length}건
                             </span>
                           </h2>
-                          <p>출근 → 퇴근 순으로 승인</p>
+                          <p>같은 직원의 기록은 시간순으로 승인</p>
                         </div>
                       </div>
                       {data.reviews.map((event) => (
@@ -750,8 +798,8 @@ export default function AdminApp({
                           </span>
                           <div>
                             <strong>
-                              {event.name} ·{" "}
-                              {event.action === "in" ? "출근" : "퇴근"}
+                              {event.name} · {clockActionLabel[event.action]}
+                              {event.job_name ? ` · ${event.job_name}` : ""}
                             </strong>
                             <small>
                               {seoulDate(event.captured_at)}{" "}
@@ -874,9 +922,9 @@ export default function AdminApp({
                       <SearchBox value={search} set={setSearch} />
                       <button
                         className="button primary"
-                        onClick={() => open("조교 등록", <EmployeeForm />)}
+                        onClick={() => open("직원 등록", <EmployeeForm />)}
                       >
-                        <Plus size={17} /> 조교 등록
+                        <Plus size={17} /> 직원 등록
                       </button>
                     </div>
                   </div>
@@ -887,7 +935,7 @@ export default function AdminApp({
                           <tr>
                             <th>직원</th>
                             <th>출퇴근 번호</th>
-                            <th>현재 시급</th>
+                            <th>직무·현재 시급</th>
                             <th>주휴 계산</th>
                             <th>휴일 배율</th>
                             <th>상태</th>
@@ -916,11 +964,34 @@ export default function AdminApp({
                                 <span className="mono">{e.phone_last4}</span>
                               </td>
                               <td>
-                                <b>
-                                  {e.current_rate
-                                    ? money(e.current_rate)
-                                    : "적용 시급 없음"}
-                                </b>
+                                {e.jobs
+                                  ?.filter((job) => job.assigned && job.active)
+                                  .map((job) => {
+                                    const rate = currentJobRate(
+                                      job,
+                                      e,
+                                      data.jobs,
+                                    );
+                                    return (
+                                      <div
+                                        className="job-rate-row"
+                                        key={job.id}
+                                      >
+                                        <b>{job.name}</b>
+                                        {job.is_default ? (
+                                          <small>기본</small>
+                                        ) : null}
+                                        <span>
+                                          {rate
+                                            ? money(rate)
+                                            : "적용 시급 없음"}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                {!e.jobs?.some(
+                                  (job) => job.assigned && job.active,
+                                ) && "직무 배정 필요"}
                               </td>
                               <td>{e.weekly_enabled ? "대상" : "제외"}</td>
                               <td>
@@ -955,25 +1026,63 @@ export default function AdminApp({
                                     className="text-button"
                                     onClick={() =>
                                       open(
-                                        `${e.name} · 월 시급`,
-                                        <RateForm employee={e} />,
+                                        `${e.name} · 직무 배정`,
+                                        <EmployeeJobsForm employee={e} />,
                                       )
                                     }
                                   >
-                                    월 시급
-                                  </button>
-                                  <button
-                                    className="text-button"
-                                    onClick={() =>
-                                      open(
-                                        `${e.name} · 하루 시급`,
-                                        <DayRateForm employee={e} />,
-                                      )
-                                    }
-                                  >
-                                    하루 시급
+                                    직무 배정
                                   </button>
                                 </div>
+                                {e.jobs?.map((job) => (
+                                  <div className="job-rate-row" key={job.id}>
+                                    {e.jobs!.length > 1 && (
+                                      <small>
+                                        {job.name}
+                                        {job.assigned ? "" : " (이전 배정)"}
+                                      </small>
+                                    )}
+                                    <button
+                                      className="text-button"
+                                      onClick={() =>
+                                        open(
+                                          `${e.name} · ${job.name} 월 시급`,
+                                          job.id === DEFAULT_JOB_ID ? (
+                                            <RateForm employee={e} />
+                                          ) : (
+                                            <JobRateForm
+                                              job={job}
+                                              rates={job.rates}
+                                              employeeId={e.id}
+                                            />
+                                          ),
+                                        )
+                                      }
+                                    >
+                                      월 시급
+                                    </button>
+                                    <button
+                                      className="text-button"
+                                      onClick={() =>
+                                        open(
+                                          `${e.name} · ${job.name} 하루 시급`,
+                                          job.id === DEFAULT_JOB_ID ? (
+                                            <DayRateForm employee={e} />
+                                          ) : (
+                                            <JobRateForm
+                                              job={job}
+                                              rates={job.rates}
+                                              employeeId={e.id}
+                                              kind="day"
+                                            />
+                                          ),
+                                        )
+                                      }
+                                    >
+                                      하루 시급
+                                    </button>
+                                  </div>
+                                ))}
                               </td>
                             </tr>
                           ))}
@@ -981,7 +1090,7 @@ export default function AdminApp({
                       </table>
                       {!employees.length && (
                         <Empty>
-                          조교를 등록하면 출퇴근과 급여 관리를 시작할 수
+                          직원을 등록하면 출퇴근과 급여 관리를 시작할 수
                           있습니다.
                         </Empty>
                       )}

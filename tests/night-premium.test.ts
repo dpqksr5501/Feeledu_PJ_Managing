@@ -243,7 +243,7 @@ test("night additions never inflate weekly allowance and disabled night policy r
   });
 });
 
-test("schema-5 backup round-trip preserves actual breaks and rejects corrupt intervals atomically; schema-4 backups still restore", async () => {
+test("current backup round-trip preserves actual breaks and rejects corrupt intervals atomically; schema-4 backups still restore", async () => {
   const id = await f.employee();
   const created = await f.shift(
     id,
@@ -296,6 +296,14 @@ test("schema-5 backup round-trip preserves actual breaks and rejects corrupt int
     };
     legacy.schema = 4;
     delete legacy.tables.shift_breaks;
+    for (const table of [
+      "job_roles",
+      "employee_jobs",
+      "job_rates",
+      "shift_jobs",
+      "clock_event_jobs",
+    ])
+      delete legacy.tables[table];
     legacy.checksum = createHash("sha256")
       .update(JSON.stringify(legacy.tables))
       .digest("hex");

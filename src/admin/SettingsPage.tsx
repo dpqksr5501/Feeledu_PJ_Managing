@@ -24,6 +24,7 @@ import {
 } from "./forms.tsx";
 import { adminRoleLabel } from "../../shared/admin-role.ts";
 import HolidayCalendarPanel from "./HolidayCalendarPanel.tsx";
+import { JobSettingsPanel } from "./JobForms.tsx";
 
 export default function SettingsPage() {
   const { admin, data, mutate, open } = useAdmin();
@@ -62,6 +63,7 @@ export default function SettingsPage() {
   }
   return (
     <div className="settings-stack">
+      <JobSettingsPanel />
       <PolicyForm key={JSON.stringify(data.policy)} initial={data.policy} />
       <section className="panel">
         <div className="panel-heading">

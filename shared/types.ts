@@ -1,3 +1,5 @@
+import type { ClockAction, Job, JobAssignment } from "./jobs.ts";
+
 export type Role = "owner" | "manager";
 export type Admin = {
   id: string;
@@ -20,6 +22,7 @@ export type Employee = {
   revision: number;
   rates?: Rate[];
   day_rates?: DayRate[];
+  jobs?: JobAssignment[];
 };
 export type DayRate = {
   id: string;
@@ -47,19 +50,31 @@ export type Shift = {
   note: string;
   revision: number;
   voided: number;
+  job_id?: string | null;
+  job_name?: string | null;
 };
 export type ShiftBreak = { started_at: string; ended_at: string };
 export type ClockEvent = {
   id: string;
   employee_id: string;
-  action: "in" | "out";
+  action: ClockAction;
   captured_at: string;
   offline: boolean;
+  job_id?: string;
+  expected_shift_id?: string;
+};
+export type ClockResult = {
+  status: "accepted" | "pending" | "rejected";
+  review_reason: string;
+  shift_id: string | null;
 };
 export type ReviewEvent = {
   id: string;
   name: string;
-  action: "in" | "out";
+  action: ClockAction;
+  employee_id?: string;
+  job_id?: string | null;
+  job_name?: string | null;
   captured_at: string;
   received_at: string;
   status: string;
@@ -129,6 +144,8 @@ export type PayrollRow = {
   weeklyDetails: { date: string; hours: number; amount: number }[];
   dailyDetails?: {
     date: string;
+    jobId?: string;
+    jobName?: string;
     seconds: number;
     hourlyRate: number;
     base: number;
@@ -162,6 +179,16 @@ export type RosterEntry = {
   name: string;
   phone_last4: string;
   working: boolean;
+  jobs?: Job[];
+  open_shift_id?: string | null;
+  open_job?: Job | null;
+  pending?: (Pick<
+    ClockEvent,
+    "id" | "action" | "job_id" | "expected_shift_id"
+  > & {
+    job_name?: string | null;
+    shift_id?: string;
+  })[];
 };
 export type Device = {
   id: string;
@@ -172,6 +199,7 @@ export type Device = {
 };
 export type AttendanceSegment = {
   shiftId: string;
+  jobName?: string;
   startedAt: string;
   endedAt: string;
   seconds: number;

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
   Adjustment,
+  DayRate,
   Employee,
   Holiday,
   Payroll,
@@ -8,6 +9,8 @@ import type {
   Rate,
   Shift,
 } from "../shared/types.ts";
+import { DEFAULT_JOB_ID } from "../shared/jobs.ts";
+import { jobRatesForPeriod } from "./jobs.ts";
 import {
   addDays,
   dayStart,
@@ -59,7 +62,8 @@ export function calculatePayroll(
     .all(from, to) as unknown as Adjustment[];
   const dayRates = db
     .prepare("SELECT * FROM day_rates WHERE date BETWEEN ? AND ? ORDER BY date")
-    .all(firstWeek, to);
+    .all(firstWeek, to) as unknown as DayRate[];
+  const jobRates = jobRatesForPeriod(db, firstWeek, to);
   const warnings: string[] = calendarWarnings(
     db,
     firstWeek,
@@ -101,12 +105,6 @@ export function calculatePayroll(
       const employeeRates = rates.filter(
         (rate) => rate.employee_id === employee.id,
       );
-      const rateAt = (date: string) =>
-        (dayRates.find(
-          (rate) => rate.employee_id === employee.id && rate.date === date,
-        )?.hourly_rate as number | undefined) ??
-        employeeRates.filter((rate) => rate.effective_from <= date).at(-1)
-          ?.hourly_rate;
       for (const shift of shifts.filter((s) => s.employee_id === employee.id)) {
         if (!shift.ended_at) {
           row.warnings.push(
@@ -131,6 +129,9 @@ export function calculatePayroll(
           row.warnings.push(`${seoulDate(start)} ${invalidBreak}`);
           continue;
         }
+        const jobId = shift.job_id ?? DEFAULT_JOB_ID;
+        const commonRates = jobRates.common(jobId);
+        const jobPersonalRates = jobRates.forEmployee(employee.id, jobId);
         // Older total-only breaks remain proportional estimates. Never finalize
         // an ambiguous night/rate/date allocation as if an actual break was known.
         if (
@@ -162,9 +163,29 @@ export function calculatePayroll(
           const next = workSegmentEnd(cursor, Math.min(finish, end));
           const paidMilliseconds = paidMillisecondsInRange(shift, cursor, next);
           const seconds = paidMilliseconds / 1000;
-          const rate = rateAt(date);
+          const exceptional =
+            jobId === DEFAULT_JOB_ID
+              ? dayRates.find(
+                  (r) => r.employee_id === employee.id && r.date === date,
+                )
+              : jobPersonalRates.find(
+                  (r) => r.kind === "day" && r.date === date,
+                );
+          const personalRate =
+            jobId === DEFAULT_JOB_ID
+              ? employeeRates.findLast((r) => r.effective_from <= date)
+                  ?.hourly_rate
+              : jobPersonalRates.findLast(
+                  (r) => r.kind === "monthly" && r.date <= date,
+                )?.hourly_rate;
+          const rate =
+            exceptional?.hourly_rate ??
+            personalRate ??
+            commonRates.findLast((r) => r.date <= date)?.hourly_rate;
           if (!rate) {
-            row.warnings.push(`${date} 적용 시급이 없습니다.`);
+            row.warnings.push(
+              `${date}${shift.job_name ? " " + shift.job_name : ""} 적용 시급이 없습니다.`,
+            );
             cursor = next;
             continue;
           }
@@ -192,7 +213,10 @@ export function calculatePayroll(
               : 0;
             row.nightSeconds! += nightSeconds;
             row.night! += night;
-            const daily = row.dailyDetails!.find((day) => day.date === date);
+            const daily = row.dailyDetails!.find(
+              (day) =>
+                day.date === date && day.jobId === (shift.job_id ?? undefined),
+            );
             if (daily) {
               daily.seconds += seconds;
               daily.base += base;
@@ -202,15 +226,16 @@ export function calculatePayroll(
             } else
               row.dailyDetails!.push({
                 date,
+                ...(shift.job_id && shift.job_name
+                  ? { jobId: shift.job_id, jobName: shift.job_name }
+                  : {}),
                 seconds,
                 hourlyRate: rate,
                 base,
                 holiday,
                 night,
                 nightSeconds,
-                specialRate: dayRates.some(
-                  (r) => r.employee_id === employee.id && r.date === date,
-                ),
+                specialRate: !!exceptional,
                 holidayName: holidayName(date, holidayRows, policy),
               });
           }

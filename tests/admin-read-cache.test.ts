@@ -69,7 +69,7 @@ test("record changes refresh affected calculations without reloading staff, and 
   expect(resourcesAfterMutation("/admin/employees/id/day-rates")).toContain(
     "payroll",
   );
-  expect(resourcesForView("overview", true)).toEqual(["policy"]);
+  expect(resourcesForView("overview", true)).toEqual(["policy", "jobs"]);
   expect(resourcesForView("settings", false)).not.toContain("accounts");
   for (let i = 0; i < 20; i++) await cache.get("records:" + i, async () => i);
   expect(cache.size).toBe(4);

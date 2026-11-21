@@ -1,5 +1,6 @@
 import { openDB } from "idb";
-import type { ClockEvent, RosterEntry } from "../shared/types.ts";
+import type { ClockEvent, ClockResult, RosterEntry } from "../shared/types.ts";
+import { projectRosterEntry } from "./kiosk-jobs.ts";
 type QueueItem = ClockEvent & { seq: number; retry_after?: number };
 export const kioskDb = openDB("feeledu-kiosk-v1", 1, {
   upgrade(db) {
@@ -35,8 +36,35 @@ export const kioskStore = {
     if (item) await tx.store.put({ ...item, offline: true });
     await tx.done;
   },
-  async remove(id: string) {
-    return (await kioskDb).delete("queue", id);
+  async acknowledge(event: ClockEvent, result: ClockResult) {
+    const tx = (await kioskDb).transaction(["meta", "queue"], "readwrite");
+    const meta = tx.objectStore("meta");
+    const roster = (await meta.get("roster")) as Roster | undefined;
+    if (roster) {
+      roster.employees = roster.employees.map((person) => {
+        if (person.id !== event.employee_id) return person;
+        const pending = (person.pending ?? []).filter(
+          (item) => item.id !== event.id,
+        );
+        if (result.status === "pending")
+          pending.push({
+            id: event.id,
+            action: event.action,
+            job_id: event.job_id,
+            expected_shift_id: event.expected_shift_id,
+          });
+        if (result.status !== "accepted" || !result.shift_id)
+          return { ...person, pending };
+        const confirmed = projectRosterEntry({ ...person, pending: [] }, [
+          { ...event, id: event.action === "out" ? event.id : result.shift_id },
+        ]);
+        return { ...confirmed, pending };
+      });
+      await meta.put(roster, "roster");
+    }
+    await tx.objectStore("queue").delete(event.id);
+    await tx.done;
+    return roster;
   },
   async deferUnknownEmployee(id: string) {
     const db = await kioskDb;

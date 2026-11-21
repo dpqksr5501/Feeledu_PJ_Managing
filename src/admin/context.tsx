@@ -11,6 +11,7 @@ import type {
   ReviewEvent,
   Shift,
 } from "../../shared/types.ts";
+import type { JobRole } from "../../shared/jobs.ts";
 export type AuditEntry = {
   id: string;
   actor_name: string | null;
@@ -32,6 +33,7 @@ export type SettlementEntry = {
 };
 export type AdminData = {
   employees: Employee[];
+  jobs: JobRole[];
   records: Shift[];
   reviews: ReviewEvent[];
   payroll: Payroll;

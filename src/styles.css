@@ -1903,3 +1903,16 @@ td strong {
     padding: 26px 22px;
   }
 }
+.job-options {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.job-rate-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}

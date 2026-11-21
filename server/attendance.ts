@@ -92,6 +92,7 @@ export function attendanceWeek(
           else day.liveSeconds += seconds;
           day.segments.push({
             shiftId: shift.id,
+            ...(shift.job_name ? { jobName: shift.job_name } : {}),
             startedAt: new Date(left).toISOString(),
             endedAt: new Date(right).toISOString(),
             seconds,

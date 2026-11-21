@@ -36,7 +36,7 @@ if (!response.ok || !result.ok)
   throw new Error(result.error || "데이터 이전에 실패했습니다.");
 if (
   snapshotTables.some(
-    (table) => result.counts[table] !== snapshot.tables[table].length,
+    (table) => result.counts[table] !== (snapshot.tables[table]?.length ?? 0),
   )
 )
   throw new Error(

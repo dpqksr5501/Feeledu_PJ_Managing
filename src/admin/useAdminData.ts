@@ -6,6 +6,7 @@ import { AdminReadCache } from "./read-cache.ts";
 const EMPTY: never[] = [];
 const paths: Record<AdminResource, string> = {
   employees: "employees",
+  jobs: "jobs",
   records: "records",
   reviews: "reviews",
   payroll: "payroll",
@@ -25,8 +26,8 @@ export function resourcesForView(
   return [
     "policy",
     ...({
-      overview: [],
-      employees: ["employees"],
+      overview: ["jobs"],
+      employees: ["employees", "jobs"],
       records: ["employees", "holidays", "records", "reviews"],
       payroll: [
         "employees",
@@ -35,7 +36,7 @@ export function resourcesForView(
         "adjustments",
         "settlements",
       ],
-      settings: ["holidays", ...(owner ? ["accounts", "devices"] : [])],
+      settings: ["holidays", "jobs", ...(owner ? ["accounts", "devices"] : [])],
       audit: ["audit"],
     }[view] ?? []),
   ] as AdminResource[];
@@ -45,6 +46,8 @@ export function resourcesAfterMutation(
 ): AdminResource[] | undefined {
   if (path.startsWith("/admin/employees"))
     return ["employees", "records", "reviews", "payroll", "audit"];
+  if (path.startsWith("/admin/jobs"))
+    return ["jobs", "employees", "records", "reviews", "payroll", "audit"];
   if (/^\/admin\/(records|reviews|recovery)/.test(path))
     return ["records", "reviews", "payroll", "audit"];
   if (path.startsWith("/admin/settings")) return ["policy", "payroll", "audit"];
@@ -168,6 +171,7 @@ export function useAdminData({
     ? {
         policy,
         employees: get("employees") ?? EMPTY,
+        jobs: get("jobs") ?? EMPTY,
         records: get("records") ?? EMPTY,
         reviews: get("reviews") ?? EMPTY,
         holidays: get("holidays") ?? EMPTY,

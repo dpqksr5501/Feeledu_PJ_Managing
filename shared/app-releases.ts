@@ -13,6 +13,16 @@ export type AppRelease = {
 // Newest first. Keep IDs stable so skipped versions can be acknowledged together.
 export const appReleases: ReleaseNote[] = [
   {
+    id: "2026-11-21.1",
+    date: "2026-11-21",
+    title: "직원별 근무 직무와 시급",
+    changes: [
+      "설정에서 근무 직무를 등록하고 직원·시급에서 사람마다 가능한 직무와 시급을 지정할 수 있습니다.",
+      "태블릿에서 배정된 직무로 출근하고 근무 중에 다른 직무로 전환할 수 있습니다.",
+      "급여 상세에서 날짜와 직무별 계산을 확인하며 지급액은 직원별로 합산합니다.",
+    ],
+  },
+  {
     id: "2026-11-17.2",
     date: "2026-11-17",
     title: "로고 배경 투명 표시",

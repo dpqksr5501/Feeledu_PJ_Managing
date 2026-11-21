@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Policy } from "../shared/types.ts";
+import { DEFAULT_JOB_ID, DEFAULT_JOB_NAME } from "../shared/jobs.ts";
 export type SqlValue = string | number | null;
 export interface Db {
   prepare(sql: string): {
@@ -34,7 +35,7 @@ export function initializeDb(db: Db) {
     const version = db
       .prepare("SELECT MAX(version) AS n FROM schema_version")
       .get() as { n: number };
-    if (version.n > 5) {
+    if (version.n > 6) {
       db.close();
       throw new Error(
         "이 데이터베이스는 더 최신 앱 버전으로 생성됐습니다. 앱을 업데이트해 주세요.",
@@ -134,6 +135,43 @@ export function initializeDb(db: Db) {
       PRIMARY KEY(shift_id,started_at), CHECK(ended_at>started_at));`);
     db.prepare("INSERT OR IGNORE INTO schema_version VALUES(5)").run();
   });
+  transaction(db, () => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS job_roles (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+        revision INTEGER NOT NULL DEFAULT 1);
+      CREATE UNIQUE INDEX IF NOT EXISTS active_job_name ON job_roles(name COLLATE NOCASE) WHERE active=1;
+      CREATE TABLE IF NOT EXISTS employee_jobs (
+        employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        job_id TEXT NOT NULL REFERENCES job_roles(id), active INTEGER NOT NULL CHECK(active IN (0,1)),
+        is_default INTEGER NOT NULL CHECK(is_default IN (0,1) AND is_default<=active),
+        PRIMARY KEY(employee_id,job_id));
+      CREATE UNIQUE INDEX IF NOT EXISTS employee_default_job ON employee_jobs(employee_id) WHERE is_default=1;
+      CREATE INDEX IF NOT EXISTS employee_jobs_by_role ON employee_jobs(job_id,active);
+      CREATE TABLE IF NOT EXISTS job_rates (
+        id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES job_roles(id),
+        employee_id TEXT,
+        kind TEXT NOT NULL CHECK(kind IN ('monthly','day')), date TEXT NOT NULL,
+        hourly_rate INTEGER CHECK(hourly_rate BETWEEN 1 AND 1000000),
+        reason TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+        CHECK(employee_id IS NOT NULL OR kind='monthly'),
+        CHECK(hourly_rate IS NOT NULL OR (employee_id IS NOT NULL AND kind='monthly')),
+        FOREIGN KEY(employee_id,job_id) REFERENCES employee_jobs(employee_id,job_id) ON DELETE CASCADE);
+      CREATE UNIQUE INDEX IF NOT EXISTS job_default_rates ON job_rates(job_id,date) WHERE employee_id IS NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS job_person_rates ON job_rates(employee_id,job_id,kind,date) WHERE employee_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS job_rates_by_date ON job_rates(date,kind);
+      CREATE INDEX IF NOT EXISTS job_rate_history ON job_rates(job_id,employee_id,kind,date);
+      CREATE TABLE IF NOT EXISTS shift_jobs (
+        shift_id TEXT PRIMARY KEY REFERENCES shifts(id) ON DELETE CASCADE,
+        job_id TEXT NOT NULL REFERENCES job_roles(id));
+      CREATE TABLE IF NOT EXISTS clock_event_jobs (
+        event_id TEXT PRIMARY KEY REFERENCES clock_events(id) ON DELETE CASCADE,
+        job_id TEXT, expected_shift_id TEXT);
+      CREATE INDEX IF NOT EXISTS clock_pending_by_employee ON clock_events(employee_id,captured_at,received_at) WHERE status='pending';
+    `);
+    seedDefaultJob(db);
+    db.prepare("INSERT OR IGNORE INTO schema_version VALUES(6)").run();
+  });
   // Only pending events enter this index; accepted history costs no index writes.
   db.exec(`
     CREATE INDEX IF NOT EXISTS shifts_end ON shifts(ended_at,started_at);
@@ -146,6 +184,13 @@ export function initializeDb(db: Db) {
     CREATE INDEX IF NOT EXISTS rates_effective ON rates(effective_from);
   `);
   return db;
+}
+
+export function seedDefaultJob(db: Db) {
+  db.prepare("INSERT OR IGNORE INTO job_roles(id,name) VALUES(?,?)").run(
+    DEFAULT_JOB_ID,
+    DEFAULT_JOB_NAME,
+  );
 }
 
 export function transaction<T>(db: Db, fn: () => T): T {

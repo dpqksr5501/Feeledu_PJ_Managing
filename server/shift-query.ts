@@ -4,8 +4,9 @@ import type { Db } from "./database.ts";
 // index would scan all historical shifts for each recent-week/month request.
 // Arguments: rangeEnd, rangeBegin, rangeEnd. Half-open interval [begin,end).
 export function shiftRangeSql(withNames = false) {
-  const select = withNames ? "s.*,e.name" : "s.*";
-  const join = withNames ? "JOIN employees e ON e.id=s.employee_id" : "";
+  const select = `s.*,sj.job_id,j.name AS job_name${withNames ? ",e.name" : ""}`;
+  const join = `${withNames ? "JOIN employees e ON e.id=s.employee_id" : ""}
+    LEFT JOIN shift_jobs sj ON sj.shift_id=s.id LEFT JOIN job_roles j ON j.id=sj.job_id`;
   const valid = withNames ? "" : "AND s.voided=0";
   return `SELECT ${select} FROM shifts s INDEXED BY shifts_end ${join}
     WHERE s.ended_at IS NULL AND s.started_at<? ${valid}
